@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
-FROM golang:1.22.12 AS builder
+ARG BUILDPLATFORM=linux/amd64
+FROM --platform=${BUILDPLATFORM} golang:1.22.12 AS builder
 
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
