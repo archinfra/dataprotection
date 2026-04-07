@@ -1,0 +1,20 @@
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: BackupSource
+metadata:
+  name: mysql-prod
+  namespace: backup-system
+spec:
+  driver: mysql
+  endpoint:
+    host: mysql.default.svc.cluster.local
+    port: 3306
+    username: root
+    passwordFrom:
+      name: mysql-runtime-auth
+      key: password
+  driverConfig:
+    mysql:
+      mode: logical
+      databases:
+        - orders
+        - inventory

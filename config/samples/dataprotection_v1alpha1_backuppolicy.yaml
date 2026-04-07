@@ -1,0 +1,19 @@
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: BackupPolicy
+metadata:
+  name: mysql-prod-daily
+  namespace: backup-system
+spec:
+  sourceRef:
+    name: mysql-prod
+  repositoryRefs:
+    - name: minio-dc2
+    - name: nfs-dc1
+  schedule:
+    cron: "0 2 * * *"
+    concurrencyPolicy: Forbid
+  retention:
+    keepLast: 7
+  verification:
+    enabled: true
+    mode: Metadata
