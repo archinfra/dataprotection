@@ -9,6 +9,14 @@ Current scope:
 - a built-in MySQL runtime as the first real data driver
 - online image publishing and offline `.run` installation
 
+## Documentation
+
+- current project status and business logic: [docs/PROJECT-STATUS.zh-CN.md](docs/PROJECT-STATUS.zh-CN.md)
+- manual validation and acceptance plan: [docs/MANUAL-TEST-PLAN.zh-CN.md](docs/MANUAL-TEST-PLAN.zh-CN.md)
+- development guide: [docs/DEVELOPMENT.zh-CN.md](docs/DEVELOPMENT.zh-CN.md)
+- environment guide: [docs/ENVIRONMENT.zh-CN.md](docs/ENVIRONMENT.zh-CN.md)
+- publishing guide: [docs/PUBLISHING.zh-CN.md](docs/PUBLISHING.zh-CN.md)
+
 ## CRDs
 
 - `BackupSource`
