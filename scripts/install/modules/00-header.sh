@@ -7,7 +7,7 @@
 set -Eeuo pipefail
 
 APP_NAME="data-protection-operator"
-APP_VERSION="${APP_VERSION:-0.1.0}"
+APP_VERSION="${APP_VERSION:-0.1.1}"
 WORKDIR="/tmp/${APP_NAME}-installer"
 IMAGE_DIR="${WORKDIR}/images"
 MANIFEST_DIR="${WORKDIR}/manifests"
@@ -18,7 +18,8 @@ PAYLOAD_MARKER="__PAYLOAD_BELOW__"
 
 ACTION="install"
 NAMESPACE="data-protection-system"
-REGISTRY="docker.io/archinfra"
+DEFAULT_REGISTRY="sealos.hub:5000/kube4"
+REGISTRY="${REGISTRY:-${DEFAULT_REGISTRY}}"
 REGISTRY_USER="${REGISTRY_USER:-}"
 REGISTRY_PASSWORD="${REGISTRY_PASSWORD:-}"
 IMAGE_PULL_POLICY="IfNotPresent"
@@ -63,4 +64,3 @@ section() {
   echo -e "${BLUE}${BOLD}$*${NC}"
   echo -e "${BLUE}${BOLD}============================================================${NC}"
 }
-

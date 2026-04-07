@@ -31,7 +31,25 @@ extract_payload() {
   local marker_line
   marker_line="$(awk "/^${PAYLOAD_MARKER}$/ { print NR + 1; exit 0; }" "$0")"
   [[ -n "${marker_line}" ]] || die "Payload marker not found"
-  tail -n +"${marker_line}" "$0" | tar -xz -C "${WORKDIR}"
+
+  if tail -n +"${marker_line}" "$0" | tar -tzf - >/dev/null 2>&1; then
+    tail -n +"${marker_line}" "$0" | tar -xzf - -C "${WORKDIR}"
+    return 0
+  fi
+
+  warn "Payload stream has unexpected leading bytes, retrying with one-byte trim"
+  if tail -n +"${marker_line}" "$0" | tail -c +2 | tar -tzf - >/dev/null 2>&1; then
+    tail -n +"${marker_line}" "$0" | tail -c +2 | tar -xzf - -C "${WORKDIR}"
+    return 0
+  fi
+
+  warn "Payload stream still invalid, retrying with two-byte trim"
+  if tail -n +"${marker_line}" "$0" | tail -c +3 | tar -tzf - >/dev/null 2>&1; then
+    tail -n +"${marker_line}" "$0" | tail -c +3 | tar -xzf - -C "${WORKDIR}"
+    return 0
+  fi
+
+  die "Unable to extract embedded payload"
 }
 
 validate_environment() {
@@ -53,10 +71,30 @@ trim_slash() {
   printf '%s' "${value}"
 }
 
-target_image_ref() {
+image_json_field() {
   local name="$1"
-  local tag="$2"
-  printf '%s/%s:%s' "$(trim_slash "${REGISTRY}")" "${name}" "${tag}"
+  local field="$2"
+  jq -r --arg name "${name}" --arg field "${field}" 'map(select(.name == $name)) | first | .[$field] // empty' "${IMAGE_JSON}"
+}
+
+retarget_image_ref() {
+  local source_ref="$1"
+  local registry_repo
+  registry_repo="$(trim_slash "${REGISTRY}")"
+  [[ -n "${source_ref}" ]] || die "image source ref is empty"
+  [[ -n "${registry_repo}" ]] || {
+    printf '%s' "${source_ref}"
+    return
+  }
+  printf '%s/%s' "${registry_repo}" "${source_ref##*/}"
+}
+
+default_image_ref() {
+  local name="$1"
+  local default_ref
+  default_ref="$(image_json_field "${name}" tag)"
+  [[ -n "${default_ref}" ]] || die "Unable to resolve image tag for ${name} from image.json"
+  retarget_image_ref "${default_ref}"
 }
 
 operator_image_ref() {
@@ -64,7 +102,7 @@ operator_image_ref() {
     printf '%s' "${OPERATOR_IMAGE_OVERRIDE}"
     return
   fi
-  target_image_ref "dataprotection-operator" "${APP_VERSION}-$(installer_arch)"
+  default_image_ref "dataprotection-operator"
 }
 
 mysql_runner_image_ref() {
@@ -72,7 +110,7 @@ mysql_runner_image_ref() {
     printf '%s' "${MYSQL_RUNNER_IMAGE_OVERRIDE}"
     return
   fi
-  target_image_ref "dataprotection-mysql" "8.0.45"
+  default_image_ref "dataprotection-mysql"
 }
 
 s3_helper_image_ref() {
@@ -80,7 +118,7 @@ s3_helper_image_ref() {
     printf '%s' "${S3_HELPER_IMAGE_OVERRIDE}"
     return
   fi
-  target_image_ref "dataprotection-minio-mc" "latest"
+  default_image_ref "dataprotection-minio-mc"
 }
 
 placeholder_runner_image_ref() {
@@ -88,12 +126,5 @@ placeholder_runner_image_ref() {
     printf '%s' "${PLACEHOLDER_RUNNER_IMAGE_OVERRIDE}"
     return
   fi
-  target_image_ref "dataprotection-busybox" "1.36"
-}
-
-installer_arch() {
-  local arch
-  arch="$(jq -r 'first(.[]).arch' "${IMAGE_JSON}")"
-  [[ -n "${arch}" && "${arch}" != "null" ]] || die "Unable to detect installer arch from image.json"
-  printf '%s' "${arch}"
+  default_image_ref "dataprotection-busybox"
 }

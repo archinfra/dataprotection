@@ -14,12 +14,11 @@ prepare_images() {
   while IFS= read -r item; do
     [[ -n "${item}" ]] || continue
 
-    local name tag tar_name tar_path source_ref target_ref
-    name="$(jq -r '.name' <<<"${item}")"
-    tag="$(jq -r '.tag' <<<"${item}")"
+    local default_target_ref tar_name tar_path source_ref target_ref
+    default_target_ref="$(jq -r '.tag' <<<"${item}")"
     tar_name="$(jq -r '.tar' <<<"${item}")"
     tar_path="${IMAGE_DIR}/${tar_name}"
-    target_ref="$(target_image_ref "${name}" "${tag}")"
+    target_ref="$(retarget_image_ref "${default_target_ref}")"
 
     if docker image inspect "${target_ref}" >/dev/null 2>&1; then
       log "Reuse local image ${target_ref}"
@@ -28,11 +27,12 @@ prepare_images() {
       log "Loading ${tar_name}"
       source_ref="$(docker load -i "${tar_path}" | awk -F': ' '/Loaded image/ {print $2}' | tail -n 1)"
       [[ -n "${source_ref}" ]] || die "Unable to detect loaded image name from ${tar_name}"
-      docker tag "${source_ref}" "${target_ref}"
+      if [[ "${source_ref}" != "${target_ref}" ]]; then
+        docker tag "${source_ref}" "${target_ref}"
+      fi
     fi
 
     log "Pushing ${target_ref}"
     docker push "${target_ref}" >/dev/null
   done < <(jq -c '.[]' "${IMAGE_JSON}")
 }
-

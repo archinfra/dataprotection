@@ -120,13 +120,10 @@ Example:
 
 ```bash
 ./data-protection-operator-amd64.run install \
-  --registry registry.example.com/archinfra \
-  --registry-user admin \
-  --registry-password '<password>' \
   -y
 ```
 
-The installer pushes the packaged images to the target registry and then deploys the controller with those registry references as runtime defaults.
+By default the offline installer targets `sealos.hub:5000/kube4`. You can still override it with `--registry <repo-prefix>` when another local registry is required.
 
 ## Current Boundaries
 

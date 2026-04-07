@@ -117,10 +117,10 @@ prepare_images() {
     platform="$(jq -r '.platform // empty' <<<"${item}")"
     [[ -n "${platform}" ]] || platform="${PLATFORM}"
     if [[ "${name}" == "dataprotection-operator" ]]; then
-      tag="${VERSION}-${ARCH}"
+      tag="sealos.hub:5000/kube4/dataprotection-operator:${VERSION}-${ARCH}"
       item="$(jq -c --arg tag "${tag}" '.tag = $tag' <<<"${item}")"
     fi
-    build_ref="local/${name}:${tag}"
+    build_ref="${tag}"
 
     if [[ -n "${dockerfile}" ]]; then
       log "Building ${name}:${tag} for ${platform}"
@@ -169,8 +169,14 @@ package_payload() {
 
 build_installer() {
   local installer_path="${DIST_DIR}/data-protection-operator-${ARCH}.run"
+  local marker_line
+  local first_bytes
   cat "${ROOT_DIR}/install.sh" "${PAYLOAD_FILE}" > "${installer_path}"
   chmod +x "${installer_path}"
+  marker_line="$(awk '/^__PAYLOAD_BELOW__$/ { print NR + 1; exit 0; }' "${installer_path}")"
+  [[ -n "${marker_line}" ]] || die "Installer payload marker not found in ${installer_path}"
+  first_bytes="$(tail -n +"${marker_line}" "${installer_path}" | head -c 2 | od -An -tx1 | tr -d ' \n')"
+  [[ "${first_bytes}" == "1f8b" ]] || die "Installer payload verification failed for ${installer_path}: expected gzip header, got ${first_bytes:-<empty>}"
   sha256sum "${installer_path}" > "${installer_path}.sha256"
   log "Built ${installer_path}"
 }

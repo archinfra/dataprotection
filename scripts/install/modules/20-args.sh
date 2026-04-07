@@ -1,8 +1,14 @@
 parse_args() {
-  ACTION="${1:-help}"
-  if [[ $# -gt 0 ]]; then
-    shift
-  fi
+  case "${1:-help}" in
+    ""|-h|--help|help)
+      ACTION="help"
+      [[ $# -gt 0 ]] && shift
+      ;;
+    *)
+      ACTION="$1"
+      shift
+      ;;
+  esac
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -86,4 +92,3 @@ parse_args() {
       ;;
   esac
 }
-

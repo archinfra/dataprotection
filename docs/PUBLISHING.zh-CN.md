@@ -167,8 +167,8 @@ Secrets:
 例如：
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
 会额外生成 GitHub Release，并把 `.run` 产物挂到 release 里。
@@ -181,7 +181,7 @@ git push origin v0.1.0
 
 ```bash
 ./data-protection-operator-amd64.run install \
-  --registry crpi-2zeabcde.cn-hangzhou.personal.cr.aliyuncs.com/archinfra \
+  --registry sealos.hub:5000/kube4 \
   --skip-image-prepare \
   -y
 ```
@@ -267,4 +267,3 @@ git push origin v0.1.0
 
 你也可以直接 `kubectl apply` 安装清单。
 但对于离线交付、跨环境搬运和统一落仓，`.run` 体验会更稳。
-
