@@ -28,24 +28,29 @@ extract_payload() {
 
   rm -rf "${WORKDIR}"
   mkdir -p "${WORKDIR}"
-  local marker_line
-  marker_line="$(awk "/^${PAYLOAD_MARKER}$/ { print NR + 1; exit 0; }" "$0")"
+  local marker_line payload_offset skip_bytes byte_hex
+  marker_line="$(awk "/^${PAYLOAD_MARKER}$/ { print NR; exit 0; }" "$0")"
   [[ -n "${marker_line}" ]] || die "Payload marker not found"
+  payload_offset="$(( $(head -n "${marker_line}" "$0" | wc -c | tr -d ' ') + 1 ))"
 
-  if tail -n +"${marker_line}" "$0" | tar -tzf - >/dev/null 2>&1; then
-    tail -n +"${marker_line}" "$0" | tar -xzf - -C "${WORKDIR}"
-    return 0
-  fi
+  skip_bytes=0
+  while :; do
+    byte_hex="$(dd if="$0" bs=1 skip="$((payload_offset + skip_bytes - 1))" count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')"
+    case "${byte_hex}" in
+      0a|0d)
+        skip_bytes=$((skip_bytes + 1))
+        ;;
+      "")
+        die "Payload boundary is invalid or empty"
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
 
-  warn "Payload stream has unexpected leading bytes, retrying with one-byte trim"
-  if tail -n +"${marker_line}" "$0" | tail -c +2 | tar -tzf - >/dev/null 2>&1; then
-    tail -n +"${marker_line}" "$0" | tail -c +2 | tar -xzf - -C "${WORKDIR}"
-    return 0
-  fi
-
-  warn "Payload stream still invalid, retrying with two-byte trim"
-  if tail -n +"${marker_line}" "$0" | tail -c +3 | tar -tzf - >/dev/null 2>&1; then
-    tail -n +"${marker_line}" "$0" | tail -c +3 | tar -xzf - -C "${WORKDIR}"
+  if tail -c +"$((payload_offset + skip_bytes))" "$0" | tar -tzf - >/dev/null 2>&1; then
+    tail -c +"$((payload_offset + skip_bytes))" "$0" | tar -xzf - -C "${WORKDIR}"
     return 0
   fi
 

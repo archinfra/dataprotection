@@ -169,13 +169,30 @@ package_payload() {
 
 build_installer() {
   local installer_path="${DIST_DIR}/data-protection-operator-${ARCH}.run"
-  local marker_line
-  local first_bytes
+  local marker_line payload_offset skip_bytes first_bytes byte_hex
   cat "${ROOT_DIR}/install.sh" "${PAYLOAD_FILE}" > "${installer_path}"
   chmod +x "${installer_path}"
-  marker_line="$(awk '/^__PAYLOAD_BELOW__$/ { print NR + 1; exit 0; }' "${installer_path}")"
+  marker_line="$(awk '/^__PAYLOAD_BELOW__$/ { print NR; exit 0; }' "${installer_path}")"
   [[ -n "${marker_line}" ]] || die "Installer payload marker not found in ${installer_path}"
-  first_bytes="$(tail -n +"${marker_line}" "${installer_path}" | head -c 2 | od -An -tx1 | tr -d ' \n')"
+
+  payload_offset="$(( $(head -n "${marker_line}" "${installer_path}" | wc -c | tr -d ' ') + 1 ))"
+  skip_bytes=0
+  while :; do
+    byte_hex="$(dd if="${installer_path}" bs=1 skip="$((payload_offset + skip_bytes - 1))" count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')"
+    case "${byte_hex}" in
+      0a|0d)
+        skip_bytes=$((skip_bytes + 1))
+        ;;
+      "")
+        die "Installer payload verification failed for ${installer_path}: payload is empty"
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+
+  first_bytes="$(dd if="${installer_path}" bs=1 skip="$((payload_offset + skip_bytes - 1))" count=2 2>/dev/null | od -An -tx1 | tr -d ' \n')"
   [[ "${first_bytes}" == "1f8b" ]] || die "Installer payload verification failed for ${installer_path}: expected gzip header, got ${first_bytes:-<empty>}"
   sha256sum "${installer_path}" > "${installer_path}.sha256"
   log "Built ${installer_path}"
