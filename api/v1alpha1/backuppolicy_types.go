@@ -6,14 +6,15 @@ import (
 )
 
 type BackupPolicySpec struct {
-	SourceRef      corev1.LocalObjectReference   `json:"sourceRef"`
-	RepositoryRefs []corev1.LocalObjectReference `json:"repositoryRefs,omitempty"`
-	Schedule       BackupScheduleSpec            `json:"schedule,omitempty"`
-	Retention      RetentionPolicy               `json:"retention,omitempty"`
-	Verification   VerificationSpec              `json:"verification,omitempty"`
-	Execution      ExecutionTemplateSpec         `json:"execution,omitempty"`
-	DriverConfig   DriverConfig                  `json:"driverConfig,omitempty"`
-	Suspend        bool                          `json:"suspend,omitempty"`
+	SourceRef          corev1.LocalObjectReference   `json:"sourceRef"`
+	RepositoryRefs     []corev1.LocalObjectReference `json:"repositoryRefs,omitempty"`
+	Schedule           BackupScheduleSpec            `json:"schedule,omitempty"`
+	Retention          RetentionRule                 `json:"retention,omitempty"`
+	RetentionPolicyRef *corev1.LocalObjectReference  `json:"retentionPolicyRef,omitempty"`
+	Verification       VerificationSpec              `json:"verification,omitempty"`
+	Execution          ExecutionTemplateSpec         `json:"execution,omitempty"`
+	DriverConfig       DriverConfig                  `json:"driverConfig,omitempty"`
+	Suspend            bool                          `json:"suspend,omitempty"`
 }
 
 type BackupPolicyStatus struct {

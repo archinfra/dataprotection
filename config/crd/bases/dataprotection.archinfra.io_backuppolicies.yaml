@@ -424,13 +424,29 @@ spec:
                   x-kubernetes-map-type: atomic
                 type: array
               retention:
-                description: RetentionPolicy 定义备份的保留策略
+                description: RetentionRule 定义兼容旧版本的内联保留策略
                 properties:
                   keepLast:
                     description: KeepLast 保留最近多少个备份，旧备份将被自动清理
                     format: int32
                     type: integer
                 type: object
+              retentionPolicyRef:
+                description: |-
+                  LocalObjectReference contains enough information to let you locate the
+                  referenced object inside the same namespace.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
               schedule:
                 description: BackupScheduleSpec 定义备份的定时调度策略（基于 Cron）
                 properties:

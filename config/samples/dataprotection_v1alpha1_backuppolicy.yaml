@@ -12,6 +12,9 @@ spec:
   schedule:
     cron: "0 2 * * *"
     concurrencyPolicy: Forbid
+  # 推荐逐步迁移到 retentionPolicyRef，保留 retention.keepLast 作为兼容入口
+  retentionPolicyRef:
+    name: mysql-daily-retention
   retention:
     keepLast: 7
   verification:

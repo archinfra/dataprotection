@@ -67,6 +67,9 @@ func (s *BackupPolicySpec) ValidateBasic() error {
 	if hasDuplicateLocalObjectReferenceNames(s.RepositoryRefs) {
 		return fmt.Errorf("spec.repositoryRefs contains duplicate repository names")
 	}
+	if s.RetentionPolicyRef != nil && strings.TrimSpace(s.RetentionPolicyRef.Name) == "" {
+		return fmt.Errorf("spec.retentionPolicyRef.name cannot be empty")
+	}
 
 	if strings.TrimSpace(s.Schedule.Cron) == "" && !s.Suspend {
 		return fmt.Errorf("spec.schedule.cron is required unless the policy is suspended")
@@ -75,6 +78,16 @@ func (s *BackupPolicySpec) ValidateBasic() error {
 		return err
 	}
 
+	return nil
+}
+
+func (s *RetentionPolicySpec) ValidateBasic() error {
+	if s.SuccessfulSnapshots.Last < 0 {
+		return fmt.Errorf("spec.successfulSnapshots.last cannot be negative")
+	}
+	if s.FailedSnapshots.Last < 0 {
+		return fmt.Errorf("spec.failedSnapshots.last cannot be negative")
+	}
 	return nil
 }
 

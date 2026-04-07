@@ -13,6 +13,7 @@ Current scope:
 
 - current project status and business logic: [docs/PROJECT-STATUS.zh-CN.md](docs/PROJECT-STATUS.zh-CN.md)
 - architecture insights inspired by KubeStash concepts: [docs/KUBESTASH-INSIGHTS.zh-CN.md](docs/KUBESTASH-INSIGHTS.zh-CN.md)
+- runtime model inferred from public KubeStash installer resources: [docs/KUBESTASH-RUNTIME-MODEL.zh-CN.md](docs/KUBESTASH-RUNTIME-MODEL.zh-CN.md)
 - manual validation and acceptance plan: [docs/MANUAL-TEST-PLAN.zh-CN.md](docs/MANUAL-TEST-PLAN.zh-CN.md)
 - development guide: [docs/DEVELOPMENT.zh-CN.md](docs/DEVELOPMENT.zh-CN.md)
 - environment guide: [docs/ENVIRONMENT.zh-CN.md](docs/ENVIRONMENT.zh-CN.md)
@@ -25,12 +26,14 @@ Current scope:
 - `BackupPolicy`
 - `BackupRun`
 - `Snapshot`
+- `RetentionPolicy`
 - `RestoreRequest`
 
 ## What Works Today
 
 - `BackupSource` / `BackupRepository` reconcile basic readiness status
 - `BackupPolicy` renders one `CronJob` per repository and cleans up stale children
+- `BackupPolicy` can resolve retention from `spec.retentionPolicyRef`
 - `BackupRun` renders one `Job` per repository
 - `BackupRun` also records one `Snapshot` object per repository target
 - `RestoreRequest` renders one restore `Job`

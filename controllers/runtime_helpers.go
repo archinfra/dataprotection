@@ -94,6 +94,14 @@ func getSnapshot(ctx context.Context, c client.Client, namespace, name string) (
 	return &snapshot, nil
 }
 
+func getRetentionPolicy(ctx context.Context, c client.Client, namespace, name string) (*dpv1alpha1.RetentionPolicy, error) {
+	var retentionPolicy dpv1alpha1.RetentionPolicy
+	if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &retentionPolicy); err != nil {
+		return nil, err
+	}
+	return &retentionPolicy, nil
+}
+
 func resolveRepositories(ctx context.Context, c client.Client, namespace string, refs []corev1.LocalObjectReference) ([]dpv1alpha1.BackupRepository, error) {
 	repositories := make([]dpv1alpha1.BackupRepository, 0, len(refs))
 	for _, ref := range refs {
@@ -222,9 +230,9 @@ func defaultExecutionTemplate(spec dpv1alpha1.ExecutionTemplateSpec) dpv1alpha1.
 	return spec
 }
 
-func buildBackupCronJob(policy *dpv1alpha1.BackupPolicy, source *dpv1alpha1.BackupSource, repository *dpv1alpha1.BackupRepository) (*batchv1.CronJob, error) {
+func buildBackupCronJob(policy *dpv1alpha1.BackupPolicy, source *dpv1alpha1.BackupSource, repository *dpv1alpha1.BackupRepository, keepLast int32) (*batchv1.CronJob, error) {
 	if useBuiltInMySQLRuntime(source.Spec.Driver, policy.Spec.Execution) {
-		return buildBuiltInMySQLBackupCronJob(policy, source, repository)
+		return buildBuiltInMySQLBackupCronJob(policy, source, repository, keepLast)
 	}
 
 	execution := defaultExecutionTemplate(policy.Spec.Execution)
@@ -259,7 +267,7 @@ func buildBackupCronJob(policy *dpv1alpha1.BackupPolicy, source *dpv1alpha1.Back
 	}, nil
 }
 
-func buildBackupRunJob(run *dpv1alpha1.BackupRun, policy *dpv1alpha1.BackupPolicy, source *dpv1alpha1.BackupSource, repository *dpv1alpha1.BackupRepository, snapshot string) (*batchv1.Job, error) {
+func buildBackupRunJob(run *dpv1alpha1.BackupRun, policy *dpv1alpha1.BackupPolicy, source *dpv1alpha1.BackupSource, repository *dpv1alpha1.BackupRepository, snapshot string, keepLast int32) (*batchv1.Job, error) {
 	execution := dpv1alpha1.ExecutionTemplateSpec{}
 	driverConfig := run.Spec.DriverConfig
 	if policy != nil {
@@ -267,7 +275,7 @@ func buildBackupRunJob(run *dpv1alpha1.BackupRun, policy *dpv1alpha1.BackupPolic
 		driverConfig = effectiveDriverConfig(policy.Spec.DriverConfig, run.Spec.DriverConfig)
 	}
 	if useBuiltInMySQLRuntime(source.Spec.Driver, execution) {
-		return buildBuiltInMySQLBackupRunJob(run, policy, source, repository, snapshot)
+		return buildBuiltInMySQLBackupRunJob(run, policy, source, repository, snapshot, keepLast)
 	}
 	execution = defaultExecutionTemplate(execution)
 	name := dpv1alpha1.BuildJobName(run.Name, repository.Name)

@@ -443,11 +443,11 @@ mc_cmd ls "backup/${remote_path}" >/dev/null 2>&1 || {
 mc_cmd mirror "backup/${remote_path}" "${local_dir}"
 echo "[INFO] s3 download completed from ${remote_path}"`
 
-func buildBuiltInMySQLBackupCronJob(policy *dpv1alpha1.BackupPolicy, source *dpv1alpha1.BackupSource, repository *dpv1alpha1.BackupRepository) (*batchv1.CronJob, error) {
+func buildBuiltInMySQLBackupCronJob(policy *dpv1alpha1.BackupPolicy, source *dpv1alpha1.BackupSource, repository *dpv1alpha1.BackupRepository, keepLast int32) (*batchv1.CronJob, error) {
 	execution := defaultMySQLExecutionTemplate(policy.Spec.Execution)
 	componentPath := mysqlComponentPath(policy.Namespace, source.Name)
 	driverConfig := effectiveMySQLDriverConfig(source.Spec.DriverConfig, policy.Spec.DriverConfig, dpv1alpha1.DriverConfig{})
-	podSpec, err := buildBuiltInMySQLBackupPodSpec(execution, source, repository, componentPath, driverConfig, "", retentionValue(policy.Spec.Retention), true)
+	podSpec, err := buildBuiltInMySQLBackupPodSpec(execution, source, repository, componentPath, driverConfig, "", keepLast, true)
 	if err != nil {
 		return nil, err
 	}
@@ -494,19 +494,17 @@ func buildBuiltInMySQLBackupCronJob(policy *dpv1alpha1.BackupPolicy, source *dpv
 	}, nil
 }
 
-func buildBuiltInMySQLBackupRunJob(run *dpv1alpha1.BackupRun, policy *dpv1alpha1.BackupPolicy, source *dpv1alpha1.BackupSource, repository *dpv1alpha1.BackupRepository, snapshot string) (*batchv1.Job, error) {
+func buildBuiltInMySQLBackupRunJob(run *dpv1alpha1.BackupRun, policy *dpv1alpha1.BackupPolicy, source *dpv1alpha1.BackupSource, repository *dpv1alpha1.BackupRepository, snapshot string, keepLast int32) (*batchv1.Job, error) {
 	execution := dpv1alpha1.ExecutionTemplateSpec{}
 	policyDriverConfig := dpv1alpha1.DriverConfig{}
-	retention := retentionValue(dpv1alpha1.RetentionPolicy{})
 	if policy != nil {
 		execution = policy.Spec.Execution
 		policyDriverConfig = policy.Spec.DriverConfig
-		retention = retentionValue(policy.Spec.Retention)
 	}
 	execution = defaultMySQLExecutionTemplate(execution)
 	driverConfig := effectiveMySQLDriverConfig(source.Spec.DriverConfig, policyDriverConfig, run.Spec.DriverConfig)
 	componentPath := mysqlComponentPath(run.Namespace, source.Name)
-	podSpec, err := buildBuiltInMySQLBackupPodSpec(execution, source, repository, componentPath, driverConfig, snapshot, retention, false)
+	podSpec, err := buildBuiltInMySQLBackupPodSpec(execution, source, repository, componentPath, driverConfig, snapshot, keepLast, false)
 	if err != nil {
 		return nil, err
 	}
@@ -935,7 +933,7 @@ func ensureMySQLSnapshotBase(snapshot string) string {
 	return strings.TrimSuffix(ensureMySQLSnapshotFile(snapshot), ".sql.gz")
 }
 
-func retentionValue(retention dpv1alpha1.RetentionPolicy) int32 {
+func retentionValue(retention dpv1alpha1.RetentionRule) int32 {
 	if retention.KeepLast <= 0 {
 		return defaultBackupRetention
 	}

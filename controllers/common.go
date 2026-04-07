@@ -1,11 +1,15 @@
 package controllers
 
 import (
+	"context"
+	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	dpv1alpha1 "github.com/archinfra/dataprotection/api/v1alpha1"
 )
@@ -45,4 +49,35 @@ func phaseMessage(phase dpv1alpha1.ResourcePhase) string {
 
 func requeueSoon() ctrl.Result {
 	return ctrl.Result{RequeueAfter: 30 * time.Second}
+}
+
+func resolveKeepLastRetention(ctx context.Context, c client.Client, namespace string, inline dpv1alpha1.RetentionRule, refName string) (int32, *dpv1alpha1.RetentionPolicy, error) {
+	keepLast := retentionValue(inline)
+	refName = trimString(refName)
+	if refName == "" {
+		return keepLast, nil, nil
+	}
+
+	retentionPolicy, err := getRetentionPolicy(ctx, c, namespace, refName)
+	if err != nil {
+		return 0, nil, err
+	}
+	if err := retentionPolicy.Spec.ValidateBasic(); err != nil {
+		return 0, retentionPolicy, newPermanentDependencyError("referenced RetentionPolicy %q is invalid: %v", retentionPolicy.Name, err)
+	}
+	if retentionPolicy.Spec.SuccessfulSnapshots.Last > 0 {
+		keepLast = retentionPolicy.Spec.SuccessfulSnapshots.Last
+	}
+	return keepLast, retentionPolicy, nil
+}
+
+func trimString(value string) string {
+	return strings.TrimSpace(value)
+}
+
+func localRefName(ref *corev1.LocalObjectReference) string {
+	if ref == nil {
+		return ""
+	}
+	return trimString(ref.Name)
 }

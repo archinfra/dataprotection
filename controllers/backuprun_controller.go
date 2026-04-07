@@ -108,6 +108,32 @@ func (r *BackupRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		snapshot = run.Name
 	}
 
+	keepLast := retentionValue(dpv1alpha1.RetentionRule{})
+	if resolved.Policy != nil {
+		resolvedKeepLast, _, err := resolveKeepLastRetention(ctx, r.Client, run.Namespace, resolved.Policy.Spec.Retention, localRefName(resolved.Policy.Spec.RetentionPolicyRef))
+		if err != nil {
+			run.Status.JobNames = nil
+			run.Status.Repositories = nil
+			switch {
+			case isDependencyMissing(err):
+				run.Status.Phase = dpv1alpha1.ResourcePhasePending
+				run.Status.CompletedAt = nil
+				markCondition(&run.Status.Conditions, "Accepted", metav1.ConditionFalse, "DependencyNotReady", err.Error(), run.Generation)
+				markCondition(&run.Status.Conditions, "Completed", metav1.ConditionFalse, "DependencyNotReady", phaseMessage(run.Status.Phase), run.Generation)
+				return patchStatus(requeueSoon(), nil)
+			case isPermanentDependencyError(err):
+				run.Status.Phase = dpv1alpha1.ResourcePhaseFailed
+				run.Status.CompletedAt = nowTime()
+				markCondition(&run.Status.Conditions, "Accepted", metav1.ConditionFalse, "InvalidRetentionPolicy", err.Error(), run.Generation)
+				markCondition(&run.Status.Conditions, "Completed", metav1.ConditionFalse, "InvalidRetentionPolicy", err.Error(), run.Generation)
+				return patchStatus(ctrl.Result{}, nil)
+			default:
+				return ctrl.Result{}, err
+			}
+		}
+		keepLast = resolvedKeepLast
+	}
+
 	jobNames := make([]string, 0, len(resolved.Repositories))
 	repositoryStatuses := make([]dpv1alpha1.RepositoryRunStatus, 0, len(resolved.Repositories))
 	var latestCompletedAt *metav1.Time
@@ -116,7 +142,7 @@ func (r *BackupRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	for i := range resolved.Repositories {
 		repository := &resolved.Repositories[i]
 		snapshotName := dpv1alpha1.BuildSnapshotName(run.Name, repository.Name, "snapshot")
-		desired, err := buildBackupRunJob(&run, resolved.Policy, resolved.Source, repository, snapshot)
+		desired, err := buildBackupRunJob(&run, resolved.Policy, resolved.Source, repository, snapshot, keepLast)
 		if err != nil {
 			run.Status.Phase = dpv1alpha1.ResourcePhaseFailed
 			run.Status.CompletedAt = nowTime()

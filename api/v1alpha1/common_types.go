@@ -126,8 +126,8 @@ type BackupScheduleSpec struct {
 	ConcurrencyPolicy batchv1.ConcurrencyPolicy `json:"concurrencyPolicy,omitempty"`
 }
 
-// RetentionPolicy 定义备份的保留策略
-type RetentionPolicy struct {
+// RetentionRule 定义兼容旧版本的内联保留策略
+type RetentionRule struct {
 	// KeepLast 保留最近多少个备份，旧备份将被自动清理
 	KeepLast int32 `json:"keepLast,omitempty"`
 }

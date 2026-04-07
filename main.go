@@ -96,6 +96,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err = (&controllers.RetentionPolicyReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		ctrl.Log.WithName("setup").Error(err, "unable to create RetentionPolicy controller")
+		os.Exit(1)
+	}
+
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		ctrl.Log.WithName("setup").Error(err, "unable to set up health check")
 		os.Exit(1)

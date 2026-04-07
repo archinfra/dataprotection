@@ -109,10 +109,32 @@ func (r *BackupPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 	}
 
+	keepLast, _, err := resolveKeepLastRetention(ctx, r.Client, policy.Namespace, policy.Spec.Retention, localRefName(policy.Spec.RetentionPolicyRef))
+	if err != nil {
+		if cleanupErr := r.cleanupOwnedCronJobs(ctx, &policy, nil); cleanupErr != nil {
+			return ctrl.Result{}, cleanupErr
+		}
+		policy.Status.Phase = dpv1alpha1.ResourcePhasePending
+		policy.Status.LastScheduleTime = nil
+		policy.Status.NextScheduleTime = nil
+		reason := "DependencyNotReady"
+		if isPermanentDependencyError(err) {
+			policy.Status.Phase = dpv1alpha1.ResourcePhaseFailed
+			reason = "InvalidRetentionPolicy"
+		} else if !isDependencyMissing(err) {
+			reason = "DependencyLookupFailed"
+		}
+		markCondition(&policy.Status.Conditions, "Ready", metav1.ConditionFalse, reason, err.Error(), policy.Generation)
+		if policy.Status.Phase == dpv1alpha1.ResourcePhaseFailed {
+			return patchStatus(ctrl.Result{}, nil)
+		}
+		return patchStatus(requeueSoon(), nil)
+	}
+
 	desiredCronJobNames := make(map[string]struct{}, len(repositories))
 	var latestLastScheduleTime *metav1.Time
 	for i := range repositories {
-		desired, err := buildBackupCronJob(&policy, source, &repositories[i])
+		desired, err := buildBackupCronJob(&policy, source, &repositories[i], keepLast)
 		if err != nil {
 			policy.Status.Phase = dpv1alpha1.ResourcePhaseFailed
 			policy.Status.LastScheduleTime = nil

@@ -113,6 +113,60 @@ func TestBackupPolicyReconcileCreatesCronJobsAndCleansUpStale(t *testing.T) {
 	}
 }
 
+func TestBackupPolicyReconcileAcceptsRetentionPolicyRef(t *testing.T) {
+	scheme := newTestScheme(t)
+	ctx := context.Background()
+
+	source := &dpv1alpha1.BackupSource{
+		ObjectMeta: metav1.ObjectMeta{Name: "mysql-prod", Namespace: "backup-system", UID: types.UID("source-uid")},
+		Spec: dpv1alpha1.BackupSourceSpec{
+			Driver: dpv1alpha1.BackupDriverMySQL,
+			Endpoint: dpv1alpha1.EndpointSpec{
+				Host: "mysql.default.svc",
+				Port: 3306,
+			},
+		},
+	}
+	repository := &dpv1alpha1.BackupRepository{
+		ObjectMeta: metav1.ObjectMeta{Name: "nfs-a", Namespace: "backup-system", UID: types.UID("repo-a")},
+		Spec: dpv1alpha1.BackupRepositorySpec{
+			Type: dpv1alpha1.RepositoryTypeNFS,
+			NFS:  &dpv1alpha1.NFSRepositorySpec{Server: "10.0.0.10", Path: "/data/a"},
+		},
+	}
+	retentionPolicy := &dpv1alpha1.RetentionPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "daily-retention", Namespace: "backup-system", UID: types.UID("retention-uid")},
+		Spec: dpv1alpha1.RetentionPolicySpec{
+			SuccessfulSnapshots: dpv1alpha1.SnapshotRetentionRule{Last: 7},
+		},
+	}
+	policy := &dpv1alpha1.BackupPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "mysql-daily", Namespace: "backup-system", UID: types.UID("policy-uid")},
+		Spec: dpv1alpha1.BackupPolicySpec{
+			SourceRef:          corev1.LocalObjectReference{Name: source.Name},
+			RepositoryRefs:     []corev1.LocalObjectReference{{Name: repository.Name}},
+			Schedule:           dpv1alpha1.BackupScheduleSpec{Cron: "0 2 * * *"},
+			RetentionPolicyRef: &corev1.LocalObjectReference{Name: retentionPolicy.Name},
+		},
+	}
+
+	fakeClient := newFakeClient(t, scheme, source, repository, retentionPolicy, policy)
+	reconciler := &BackupPolicyReconciler{Client: fakeClient, Scheme: scheme}
+
+	req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(policy)}
+	if _, err := reconciler.Reconcile(ctx, req); err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+
+	var updatedPolicy dpv1alpha1.BackupPolicy
+	if err := fakeClient.Get(ctx, client.ObjectKeyFromObject(policy), &updatedPolicy); err != nil {
+		t.Fatalf("get updated policy: %v", err)
+	}
+	if updatedPolicy.Status.Phase != dpv1alpha1.ResourcePhaseReady {
+		t.Fatalf("expected Ready phase, got %s", updatedPolicy.Status.Phase)
+	}
+}
+
 func TestBackupRunReconcileCreatesJobsAndTracksCompletion(t *testing.T) {
 	scheme := newTestScheme(t)
 	ctx := context.Background()
@@ -399,7 +453,7 @@ func TestBuildBuiltInMySQLBackupRunJobUsesRepositorySpecificRuntime(t *testing.T
 		},
 	}
 
-	job, err := buildBackupRunJob(run, nil, source, repository, "snapshot-001")
+	job, err := buildBackupRunJob(run, nil, source, repository, "snapshot-001", 5)
 	if err != nil {
 		t.Fatalf("build backup run job: %v", err)
 	}
@@ -448,6 +502,7 @@ func newFakeClient(t *testing.T, scheme *runtime.Scheme, objects ...client.Objec
 			&dpv1alpha1.BackupRun{},
 			&dpv1alpha1.RestoreRequest{},
 			&dpv1alpha1.Snapshot{},
+			&dpv1alpha1.RetentionPolicy{},
 			&batchv1.Job{},
 			&batchv1.CronJob{},
 		).
