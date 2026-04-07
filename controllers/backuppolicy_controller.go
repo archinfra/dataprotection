@@ -90,10 +90,16 @@ func (r *BackupPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		policy.Status.LastScheduleTime = nil
 		policy.Status.NextScheduleTime = nil
 		reason := "DependencyNotReady"
-		if !isDependencyMissing(err) {
+		if isPermanentDependencyError(err) {
+			policy.Status.Phase = dpv1alpha1.ResourcePhaseFailed
+			reason = "InvalidRepository"
+		} else if !isDependencyMissing(err) {
 			reason = "DependencyLookupFailed"
 		}
 		markCondition(&policy.Status.Conditions, "Ready", metav1.ConditionFalse, reason, fmt.Sprintf("unable to resolve BackupRepository references: %v", err), policy.Generation)
+		if policy.Status.Phase == dpv1alpha1.ResourcePhaseFailed {
+			return patchStatus(ctrl.Result{}, nil)
+		}
 		return patchStatus(requeueSoon(), nil)
 	}
 	for _, repository := range repositories {

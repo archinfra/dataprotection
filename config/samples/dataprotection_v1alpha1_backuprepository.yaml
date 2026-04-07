@@ -1,17 +1,9 @@
 apiVersion: dataprotection.archinfra.io/v1alpha1
 kind: BackupRepository
 metadata:
-  name: minio-dc2
+  name: mysql-prod
   namespace: backup-system
 spec:
-  type: s3
-  s3:
-    endpoint: https://minio.dc2.example.com
-    bucket: data-protection
-    prefix: prod
-    accessKeyFrom:
-      name: minio-credentials
-      key: access-key
-    secretKeyFrom:
-      name: minio-credentials
-      key: secret-key
+  storageRef:
+    name: minio-primary
+  path: mysql/prod

@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -37,8 +38,29 @@ func (r *BackupRepositoryReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		repository.Status.Phase = dpv1alpha1.ResourcePhaseFailed
 		markCondition(&repository.Status.Conditions, "Ready", metav1.ConditionFalse, "InvalidSpec", err.Error(), repository.Generation)
 	} else {
-		repository.Status.Phase = dpv1alpha1.ResourcePhaseReady
-		markCondition(&repository.Status.Conditions, "Ready", metav1.ConditionTrue, "Validated", "backup repository specification is valid", repository.Generation)
+		_, storage, err := resolveEffectiveRepository(ctx, r.Client, &repository)
+		switch {
+		case err == nil:
+			repository.Status.Phase = dpv1alpha1.ResourcePhaseReady
+			message := "backup repository specification is valid"
+			if storage != nil {
+				message = fmt.Sprintf("backup repository resolved via BackupStorage %q", storage.Name)
+			}
+			markCondition(&repository.Status.Conditions, "Ready", metav1.ConditionTrue, "Validated", message, repository.Generation)
+		case isDependencyMissing(err):
+			repository.Status.Phase = dpv1alpha1.ResourcePhasePending
+			markCondition(&repository.Status.Conditions, "Ready", metav1.ConditionFalse, "DependencyNotReady", err.Error(), repository.Generation)
+			if err := r.Status().Patch(ctx, &repository, client.MergeFrom(original)); err != nil {
+				logger.Error(err, "unable to patch BackupRepository status")
+				return ctrl.Result{}, err
+			}
+			return requeueSoon(), nil
+		case isPermanentDependencyError(err):
+			repository.Status.Phase = dpv1alpha1.ResourcePhaseFailed
+			markCondition(&repository.Status.Conditions, "Ready", metav1.ConditionFalse, "InvalidStorage", err.Error(), repository.Generation)
+		default:
+			return ctrl.Result{}, err
+		}
 	}
 
 	if err := r.Status().Patch(ctx, &repository, client.MergeFrom(original)); err != nil {

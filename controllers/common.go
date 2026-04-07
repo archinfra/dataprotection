@@ -81,3 +81,10 @@ func localRefName(ref *corev1.LocalObjectReference) string {
 	}
 	return trimString(ref.Name)
 }
+
+func hasInlineRepositoryBackend(spec *dpv1alpha1.BackupRepositorySpec) bool {
+	if spec == nil {
+		return false
+	}
+	return trimString(string(spec.Type)) != "" || spec.NFS != nil || spec.S3 != nil
+}

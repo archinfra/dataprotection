@@ -29,7 +29,7 @@ func (s *BackupSourceSpec) ValidateBasic() error {
 	return nil
 }
 
-func (s *BackupRepositorySpec) ValidateBasic() error {
+func (s *BackupStorageSpec) ValidateBasic() error {
 	if strings.TrimSpace(string(s.Type)) == "" {
 		return fmt.Errorf("spec.type is required")
 	}
@@ -56,6 +56,26 @@ func (s *BackupRepositorySpec) ValidateBasic() error {
 	return nil
 }
 
+func (s *BackupRepositorySpec) ValidateBasic() error {
+	if s.StorageRef != nil && strings.TrimSpace(s.StorageRef.Name) == "" {
+		return fmt.Errorf("spec.storageRef.name cannot be empty")
+	}
+	if s.StorageRef != nil && hasInlineRepositoryBackend(s) {
+		return fmt.Errorf("spec.storageRef cannot be combined with inline repository backend fields")
+	}
+	if s.StorageRef != nil {
+		return nil
+	}
+	if !hasInlineRepositoryBackend(s) {
+		return nil
+	}
+	return (&BackupStorageSpec{
+		Type: s.Type,
+		NFS:  s.NFS,
+		S3:   s.S3,
+	}).ValidateBasic()
+}
+
 func (s *BackupPolicySpec) ValidateBasic() error {
 	if strings.TrimSpace(s.SourceRef.Name) == "" {
 		return fmt.Errorf("spec.sourceRef.name is required")
@@ -79,6 +99,10 @@ func (s *BackupPolicySpec) ValidateBasic() error {
 	}
 
 	return nil
+}
+
+func hasInlineRepositoryBackend(s *BackupRepositorySpec) bool {
+	return strings.TrimSpace(string(s.Type)) != "" || s.NFS != nil || s.S3 != nil
 }
 
 func (s *RetentionPolicySpec) ValidateBasic() error {

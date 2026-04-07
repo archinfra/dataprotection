@@ -7,6 +7,7 @@ Current scope:
 - a generic CRD model for data protection
 - idempotent reconciliation for backup schedules and one-shot runs
 - a built-in MySQL runtime as the first real data driver
+- a Stash-inspired storage split between reusable `BackupStorage` and logical `BackupRepository`
 - online image publishing and offline `.run` installation
 
 ## Documentation
@@ -14,6 +15,7 @@ Current scope:
 - current project status and business logic: [docs/PROJECT-STATUS.zh-CN.md](docs/PROJECT-STATUS.zh-CN.md)
 - architecture insights inspired by KubeStash concepts: [docs/KUBESTASH-INSIGHTS.zh-CN.md](docs/KUBESTASH-INSIGHTS.zh-CN.md)
 - runtime model inferred from public KubeStash installer resources: [docs/KUBESTASH-RUNTIME-MODEL.zh-CN.md](docs/KUBESTASH-RUNTIME-MODEL.zh-CN.md)
+- design notes borrowed from open-source Stash: [docs/STASH-INSIGHTS.zh-CN.md](docs/STASH-INSIGHTS.zh-CN.md)
 - manual validation and acceptance plan: [docs/MANUAL-TEST-PLAN.zh-CN.md](docs/MANUAL-TEST-PLAN.zh-CN.md)
 - development guide: [docs/DEVELOPMENT.zh-CN.md](docs/DEVELOPMENT.zh-CN.md)
 - environment guide: [docs/ENVIRONMENT.zh-CN.md](docs/ENVIRONMENT.zh-CN.md)
@@ -21,6 +23,7 @@ Current scope:
 
 ## CRDs
 
+- `BackupStorage`
 - `BackupSource`
 - `BackupRepository`
 - `BackupPolicy`
@@ -31,7 +34,10 @@ Current scope:
 
 ## What Works Today
 
-- `BackupSource` / `BackupRepository` reconcile basic readiness status
+- `BackupStorage` / `BackupSource` / `BackupRepository` reconcile basic readiness status
+- `BackupRepository` can resolve backend settings from `spec.storageRef`
+- `BackupRepository.spec.path` appends a logical subpath on top of shared NFS/S3 storage
+- legacy inline repository backend fields still work for compatibility
 - `BackupPolicy` renders one `CronJob` per repository and cleans up stale children
 - `BackupPolicy` can resolve retention from `spec.retentionPolicyRef`
 - `BackupRun` renders one `Job` per repository
@@ -149,3 +155,43 @@ Not finished yet:
 - admission webhooks
 - richer metrics and events
 - backup verification runners beyond MySQL
+
+## Storage Model
+
+The repository now follows a clearer two-layer storage model inspired by Stash:
+
+- `BackupStorage` describes the reusable backend connection and credentials
+- `BackupRepository` describes the logical repository path used by an app or environment
+
+Recommended pattern:
+
+```yaml
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: BackupStorage
+metadata:
+  name: minio-primary
+  namespace: backup-system
+spec:
+  default: true
+  type: s3
+  s3:
+    endpoint: https://minio.example.com
+    bucket: data-protection
+    prefix: platform
+---
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: BackupRepository
+metadata:
+  name: mysql-prod
+  namespace: backup-system
+spec:
+  storageRef:
+    name: minio-primary
+  path: mysql/prod
+```
+
+Compatibility notes:
+
+- old inline `BackupRepository.spec.type/nfs/s3` remains supported
+- if `storageRef` is set, inline backend fields must be omitted
+- if `storageRef` is omitted and no inline backend is set, the operator will try to use the namespace default `BackupStorage`

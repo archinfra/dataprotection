@@ -1,14 +1,17 @@
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type BackupRepositorySpec struct {
-	Type    RepositoryType     `json:"type"`
-	Default bool               `json:"default,omitempty"`
-	NFS     *NFSRepositorySpec `json:"nfs,omitempty"`
-	S3      *S3RepositorySpec  `json:"s3,omitempty"`
+	StorageRef *corev1.LocalObjectReference `json:"storageRef,omitempty"`
+	Path       string                       `json:"path,omitempty"`
+	Type       RepositoryType               `json:"type,omitempty"`
+	Default    bool                         `json:"default,omitempty"`
+	NFS        *NFSRepositorySpec           `json:"nfs,omitempty"`
+	S3         *S3RepositorySpec            `json:"s3,omitempty"`
 }
 
 type BackupRepositoryStatus struct {

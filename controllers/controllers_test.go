@@ -167,6 +167,151 @@ func TestBackupPolicyReconcileAcceptsRetentionPolicyRef(t *testing.T) {
 	}
 }
 
+func TestResolveRepositoriesHydratesStorageRefAndPath(t *testing.T) {
+	scheme := newTestScheme(t)
+	ctx := context.Background()
+
+	storage := &dpv1alpha1.BackupStorage{
+		ObjectMeta: metav1.ObjectMeta{Name: "minio-primary", Namespace: "backup-system", UID: types.UID("storage-uid")},
+		Spec: dpv1alpha1.BackupStorageSpec{
+			Type: dpv1alpha1.RepositoryTypeS3,
+			S3: &dpv1alpha1.S3RepositorySpec{
+				Endpoint: "https://minio.example.com",
+				Bucket:   "data-protection",
+				Prefix:   "platform",
+			},
+		},
+	}
+	repository := &dpv1alpha1.BackupRepository{
+		ObjectMeta: metav1.ObjectMeta{Name: "mysql-prod", Namespace: "backup-system", UID: types.UID("repo-uid")},
+		Spec: dpv1alpha1.BackupRepositorySpec{
+			StorageRef: &corev1.LocalObjectReference{Name: storage.Name},
+			Path:       "mysql/prod",
+		},
+	}
+
+	fakeClient := newFakeClient(t, scheme, storage, repository)
+	repositories, err := resolveRepositories(ctx, fakeClient, repository.Namespace, []corev1.LocalObjectReference{{Name: repository.Name}})
+	if err != nil {
+		t.Fatalf("resolve repositories: %v", err)
+	}
+	if len(repositories) != 1 {
+		t.Fatalf("expected 1 resolved repository, got %d", len(repositories))
+	}
+	if repositories[0].Spec.Type != dpv1alpha1.RepositoryTypeS3 {
+		t.Fatalf("expected resolved repository type s3, got %s", repositories[0].Spec.Type)
+	}
+	if repositories[0].Spec.S3 == nil {
+		t.Fatalf("expected resolved repository s3 config")
+	}
+	if got := repositories[0].Spec.S3.Prefix; got != "platform/mysql/prod" {
+		t.Fatalf("expected resolved s3 prefix platform/mysql/prod, got %q", got)
+	}
+}
+
+func TestResolveRepositoriesUsesDefaultBackupStorage(t *testing.T) {
+	scheme := newTestScheme(t)
+	ctx := context.Background()
+
+	storage := &dpv1alpha1.BackupStorage{
+		ObjectMeta: metav1.ObjectMeta{Name: "nfs-default", Namespace: "backup-system", UID: types.UID("storage-uid")},
+		Spec: dpv1alpha1.BackupStorageSpec{
+			Default: true,
+			Type:    dpv1alpha1.RepositoryTypeNFS,
+			NFS:     &dpv1alpha1.NFSRepositorySpec{Server: "10.0.0.10", Path: "/exports/backups"},
+		},
+	}
+	repository := &dpv1alpha1.BackupRepository{
+		ObjectMeta: metav1.ObjectMeta{Name: "mysql-prod", Namespace: "backup-system", UID: types.UID("repo-uid")},
+		Spec: dpv1alpha1.BackupRepositorySpec{
+			Path: "mysql/prod",
+		},
+	}
+
+	fakeClient := newFakeClient(t, scheme, storage, repository)
+	repositories, err := resolveRepositories(ctx, fakeClient, repository.Namespace, []corev1.LocalObjectReference{{Name: repository.Name}})
+	if err != nil {
+		t.Fatalf("resolve repositories: %v", err)
+	}
+	if len(repositories) != 1 {
+		t.Fatalf("expected 1 resolved repository, got %d", len(repositories))
+	}
+	if repositories[0].Spec.NFS == nil {
+		t.Fatalf("expected resolved repository nfs config")
+	}
+	if got := repositories[0].Spec.NFS.Path; got != "/exports/backups/mysql/prod" {
+		t.Fatalf("expected resolved nfs path /exports/backups/mysql/prod, got %q", got)
+	}
+}
+
+func TestResolveRestoreRepositoryHydratesStorageRef(t *testing.T) {
+	scheme := newTestScheme(t)
+	ctx := context.Background()
+
+	storage := &dpv1alpha1.BackupStorage{
+		ObjectMeta: metav1.ObjectMeta{Name: "minio-primary", Namespace: "backup-system", UID: types.UID("storage-uid")},
+		Spec: dpv1alpha1.BackupStorageSpec{
+			Type: dpv1alpha1.RepositoryTypeS3,
+			S3: &dpv1alpha1.S3RepositorySpec{
+				Endpoint: "https://minio.example.com",
+				Bucket:   "data-protection",
+				Prefix:   "platform",
+			},
+		},
+	}
+	repository := &dpv1alpha1.BackupRepository{
+		ObjectMeta: metav1.ObjectMeta{Name: "mysql-prod", Namespace: "backup-system", UID: types.UID("repo-uid")},
+		Spec: dpv1alpha1.BackupRepositorySpec{
+			StorageRef: &corev1.LocalObjectReference{Name: storage.Name},
+			Path:       "mysql/prod",
+		},
+	}
+	source := &dpv1alpha1.BackupSource{
+		ObjectMeta: metav1.ObjectMeta{Name: "mysql-source", Namespace: "backup-system", UID: types.UID("source-uid")},
+		Spec: dpv1alpha1.BackupSourceSpec{
+			Driver: dpv1alpha1.BackupDriverMySQL,
+			Endpoint: dpv1alpha1.EndpointSpec{
+				Host: "mysql.default.svc",
+				Port: 3306,
+			},
+		},
+	}
+	backupRun := &dpv1alpha1.BackupRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "manual-001", Namespace: "backup-system", UID: types.UID("run-uid")},
+		Spec: dpv1alpha1.BackupRunSpec{
+			SourceRef:      corev1.LocalObjectReference{Name: source.Name},
+			RepositoryRefs: []corev1.LocalObjectReference{{Name: repository.Name}},
+			Snapshot:       "snapshot-001",
+		},
+		Status: dpv1alpha1.BackupRunStatus{
+			Repositories: []dpv1alpha1.RepositoryRunStatus{
+				{Name: repository.Name, Snapshot: "snapshot-001", Phase: dpv1alpha1.ResourcePhaseSucceeded},
+			},
+		},
+	}
+	restore := &dpv1alpha1.RestoreRequest{
+		ObjectMeta: metav1.ObjectMeta{Name: "restore-001", Namespace: "backup-system", UID: types.UID("restore-uid")},
+		Spec: dpv1alpha1.RestoreRequestSpec{
+			SourceRef:     corev1.LocalObjectReference{Name: source.Name},
+			BackupRunRef:  &corev1.LocalObjectReference{Name: backupRun.Name},
+			RepositoryRef: &corev1.LocalObjectReference{Name: repository.Name},
+			Target:        dpv1alpha1.RestoreTargetSpec{Mode: dpv1alpha1.RestoreTargetModeInPlace},
+		},
+	}
+
+	fakeClient := newFakeClient(t, scheme, storage, repository, source, backupRun, restore)
+	_, _, resolvedRepository, err := resolveRestoreRepository(ctx, fakeClient, restore)
+	if err != nil {
+		t.Fatalf("resolve restore repository: %v", err)
+	}
+	if resolvedRepository.Spec.S3 == nil {
+		t.Fatalf("expected resolved s3 repository")
+	}
+	if got := resolvedRepository.Spec.S3.Prefix; got != "platform/mysql/prod" {
+		t.Fatalf("expected resolved restore s3 prefix platform/mysql/prod, got %q", got)
+	}
+}
+
 func TestBackupRunReconcileCreatesJobsAndTracksCompletion(t *testing.T) {
 	scheme := newTestScheme(t)
 	ctx := context.Background()
@@ -496,6 +641,7 @@ func newFakeClient(t *testing.T, scheme *runtime.Scheme, objects ...client.Objec
 	return fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithStatusSubresource(
+			&dpv1alpha1.BackupStorage{},
 			&dpv1alpha1.BackupSource{},
 			&dpv1alpha1.BackupRepository{},
 			&dpv1alpha1.BackupPolicy{},

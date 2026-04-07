@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -70,6 +71,14 @@ func getBackupRepository(ctx context.Context, c client.Client, namespace, name s
 	return &repository, nil
 }
 
+func getBackupStorage(ctx context.Context, c client.Client, namespace, name string) (*dpv1alpha1.BackupStorage, error) {
+	var storage dpv1alpha1.BackupStorage
+	if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &storage); err != nil {
+		return nil, err
+	}
+	return &storage, nil
+}
+
 func getBackupPolicy(ctx context.Context, c client.Client, namespace, name string) (*dpv1alpha1.BackupPolicy, error) {
 	var policy dpv1alpha1.BackupPolicy
 	if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &policy); err != nil {
@@ -109,9 +118,136 @@ func resolveRepositories(ctx context.Context, c client.Client, namespace string,
 		if err != nil {
 			return nil, err
 		}
-		repositories = append(repositories, *repository)
+		effectiveRepository, _, err := resolveEffectiveRepository(ctx, c, repository)
+		if err != nil {
+			return nil, err
+		}
+		repositories = append(repositories, *effectiveRepository)
 	}
 	return repositories, nil
+}
+
+func resolveEffectiveRepository(ctx context.Context, c client.Client, repository *dpv1alpha1.BackupRepository) (*dpv1alpha1.BackupRepository, *dpv1alpha1.BackupStorage, error) {
+	if repository == nil {
+		return nil, nil, newPermanentDependencyError("backup repository cannot be nil")
+	}
+
+	effective := repository.DeepCopy()
+	repositoryPath := trimString(effective.Spec.Path)
+
+	if hasInlineRepositoryBackend(&effective.Spec) {
+		applyRepositoryPath(effective, repositoryPath)
+		return effective, nil, nil
+	}
+
+	storage, err := resolveRepositoryStorage(ctx, c, effective.Namespace, effective)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := storage.Spec.ValidateBasic(); err != nil {
+		return nil, storage, newPermanentDependencyError("referenced BackupStorage %q is invalid: %v", storage.Name, err)
+	}
+
+	effective.Spec.Type = storage.Spec.Type
+	effective.Spec.StorageRef = nil
+	effective.Spec.Default = effective.Spec.Default || storage.Spec.Default
+	effective.Spec.NFS = nil
+	effective.Spec.S3 = nil
+	if storage.Spec.NFS != nil {
+		effective.Spec.NFS = storage.Spec.NFS.DeepCopy()
+	}
+	if storage.Spec.S3 != nil {
+		effective.Spec.S3 = storage.Spec.S3.DeepCopy()
+	}
+	applyRepositoryPath(effective, repositoryPath)
+	return effective, storage, nil
+}
+
+func resolveRepositoryStorage(ctx context.Context, c client.Client, namespace string, repository *dpv1alpha1.BackupRepository) (*dpv1alpha1.BackupStorage, error) {
+	refName := localRefName(repository.Spec.StorageRef)
+	if refName != "" {
+		storage, err := getBackupStorage(ctx, c, namespace, refName)
+		if err != nil {
+			return nil, err
+		}
+		return storage, nil
+	}
+
+	var storageList dpv1alpha1.BackupStorageList
+	if err := c.List(ctx, &storageList, client.InNamespace(namespace)); err != nil {
+		return nil, err
+	}
+
+	defaults := make([]dpv1alpha1.BackupStorage, 0, len(storageList.Items))
+	for i := range storageList.Items {
+		if storageList.Items[i].Spec.Default {
+			defaults = append(defaults, storageList.Items[i])
+		}
+	}
+	switch len(defaults) {
+	case 0:
+		return nil, apierrors.NewNotFound(schema.GroupResource{
+			Group:    dpv1alpha1.GroupVersion.Group,
+			Resource: "backupstorages",
+		}, "default")
+	case 1:
+		return defaults[0].DeepCopy(), nil
+	default:
+		names := make([]string, 0, len(defaults))
+		for i := range defaults {
+			names = append(names, defaults[i].Name)
+		}
+		sort.Strings(names)
+		return nil, newPermanentDependencyError("multiple default BackupStorage resources found: %s", strings.Join(names, ", "))
+	}
+}
+
+func applyRepositoryPath(repository *dpv1alpha1.BackupRepository, repositoryPath string) {
+	if repository == nil || repositoryPath == "" {
+		return
+	}
+	switch repository.Spec.Type {
+	case dpv1alpha1.RepositoryTypeNFS:
+		if repository.Spec.NFS != nil {
+			repository.Spec.NFS.Path = joinStoragePath(repository.Spec.NFS.Path, repositoryPath)
+		}
+	case dpv1alpha1.RepositoryTypeS3:
+		if repository.Spec.S3 != nil {
+			repository.Spec.S3.Prefix = joinStoragePath(repository.Spec.S3.Prefix, repositoryPath)
+		}
+	}
+}
+
+func joinStoragePath(base, subPath string) string {
+	base = trimString(base)
+	subPath = trimString(subPath)
+	if base == "" {
+		return strings.Trim(subPath, "/")
+	}
+	if subPath == "" {
+		if strings.HasPrefix(base, "/") {
+			trimmed := strings.TrimRight(base, "/")
+			if trimmed == "" {
+				return "/"
+			}
+			return trimmed
+		}
+		return strings.Trim(base, "/")
+	}
+
+	leadingSlash := strings.HasPrefix(base, "/")
+	parts := []string{}
+	for _, part := range []string{base, subPath} {
+		part = strings.Trim(part, "/")
+		if part != "" {
+			parts = append(parts, part)
+		}
+	}
+	joined := strings.Join(parts, "/")
+	if leadingSlash {
+		return "/" + joined
+	}
+	return joined
 }
 
 func resolveBackupRunRefs(ctx context.Context, c client.Client, run *dpv1alpha1.BackupRun) (*resolvedBackupRunRefs, error) {
@@ -213,7 +349,11 @@ func resolveRestoreRepository(ctx context.Context, c client.Client, restore *dpv
 	if err != nil {
 		return backupRun, snapshot, nil, err
 	}
-	return backupRun, snapshot, repository, nil
+	effectiveRepository, _, err := resolveEffectiveRepository(ctx, c, repository)
+	if err != nil {
+		return backupRun, snapshot, nil, err
+	}
+	return backupRun, snapshot, effectiveRepository, nil
 }
 
 func defaultExecutionTemplate(spec dpv1alpha1.ExecutionTemplateSpec) dpv1alpha1.ExecutionTemplateSpec {

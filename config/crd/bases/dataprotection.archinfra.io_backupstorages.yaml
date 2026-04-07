@@ -4,14 +4,14 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.16.5
-  name: backuprepositories.dataprotection.archinfra.io
+  name: backupstorages.dataprotection.archinfra.io
 spec:
   group: dataprotection.archinfra.io
   names:
-    kind: BackupRepository
-    listKind: BackupRepositoryList
-    plural: backuprepositories
-    singular: backuprepository
+    kind: BackupStorage
+    listKind: BackupStorageList
+    plural: backupstorages
+    singular: backupstorage
   scope: Namespaced
   versions:
   - name: v1alpha1
@@ -52,8 +52,6 @@ spec:
                 - path
                 - server
                 type: object
-              path:
-                type: string
               s3:
                 description: S3RepositorySpec S3 兼容对象存储的配置
                 properties:
@@ -115,25 +113,11 @@ spec:
                 - bucket
                 - endpoint
                 type: object
-              storageRef:
-                description: |-
-                  LocalObjectReference contains enough information to let you locate the
-                  referenced object inside the same namespace.
-                properties:
-                  name:
-                    default: ""
-                    description: |-
-                      Name of the referent.
-                      This field is effectively required, but due to backwards compatibility is
-                      allowed to be empty. Instances of this type with an empty value here are
-                      almost certainly wrong.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                    type: string
-                type: object
-                x-kubernetes-map-type: atomic
               type:
                 description: RepositoryType 定义备份存储库的类型
                 type: string
+            required:
+            - type
             type: object
           status:
             properties:
