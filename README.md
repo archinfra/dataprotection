@@ -74,6 +74,7 @@ Recommended release path:
 
 - use GitHub Actions for multi-arch images and `.run` artifacts
 - keep local builds for development fallback only
+- publishing and installation details: `docs/PUBLISHING.zh-CN.md`
 
 ## Online Image Publishing
 
@@ -90,7 +91,9 @@ Expected GitHub secrets:
 
 Expected GitHub variables:
 
+- `PUBLISH_DOCKERHUB` (`true` or `false`, default `true`)
 - `DOCKERHUB_NAMESPACE` (optional, defaults to repository owner)
+- `PUBLISH_ALIYUN` (`true` or `false`, default `true`)
 - `ALIYUN_REGISTRY`
 - `ALIYUN_NAMESPACE` (optional, defaults to repository owner)
 
