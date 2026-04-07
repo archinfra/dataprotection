@@ -8,4 +8,7 @@ spec:
     name: mysql-prod-daily
   sourceRef:
     name: mysql-prod
+  # Optional: narrow a manual run to one storage instead of all policy storages.
+  storageRefs:
+    - name: minio-primary
   reason: "manual smoke backup"

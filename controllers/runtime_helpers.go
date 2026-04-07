@@ -11,7 +11,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -23,19 +22,23 @@ const (
 	resourceKindLabel     = "dataprotection.archinfra.io/resource-kind"
 	resourceNameLabel     = "dataprotection.archinfra.io/resource-name"
 	sourceNameLabel       = "dataprotection.archinfra.io/source-name"
-	repositoryNameLabel   = "dataprotection.archinfra.io/repository-name"
+	storageNameLabel      = "dataprotection.archinfra.io/storage-name"
 	operationLabel        = "dataprotection.archinfra.io/operation"
 	snapshotAnnotation    = "dataprotection.archinfra.io/snapshot"
 	reasonAnnotation      = "dataprotection.archinfra.io/reason"
 	targetModeAnnotation  = "dataprotection.archinfra.io/target-mode"
+	storagePathAnnotation = "dataprotection.archinfra.io/storage-path"
 	placeholderAnnotation = "dataprotection.archinfra.io/placeholder-runner"
 	managedByValue        = "data-protection-operator"
 )
 
+// resolvedBackupRunRefs keeps the controller logic readable: resolve all
+// cross-resource references once, then pass a small, typed bundle downward.
 type resolvedBackupRunRefs struct {
-	Policy       *dpv1alpha1.BackupPolicy
-	Source       *dpv1alpha1.BackupSource
-	Repositories []dpv1alpha1.BackupRepository
+	Policy      *dpv1alpha1.BackupPolicy
+	Source      *dpv1alpha1.BackupSource
+	Storages    []dpv1alpha1.BackupStorage
+	StoragePath string
 }
 
 type permanentDependencyError struct {
@@ -61,14 +64,6 @@ func getBackupSource(ctx context.Context, c client.Client, namespace, name strin
 		return nil, err
 	}
 	return &source, nil
-}
-
-func getBackupRepository(ctx context.Context, c client.Client, namespace, name string) (*dpv1alpha1.BackupRepository, error) {
-	var repository dpv1alpha1.BackupRepository
-	if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &repository); err != nil {
-		return nil, err
-	}
-	return &repository, nil
 }
 
 func getBackupStorage(ctx context.Context, c client.Client, namespace, name string) (*dpv1alpha1.BackupStorage, error) {
@@ -111,143 +106,19 @@ func getRetentionPolicy(ctx context.Context, c client.Client, namespace, name st
 	return &retentionPolicy, nil
 }
 
-func resolveRepositories(ctx context.Context, c client.Client, namespace string, refs []corev1.LocalObjectReference) ([]dpv1alpha1.BackupRepository, error) {
-	repositories := make([]dpv1alpha1.BackupRepository, 0, len(refs))
+func resolveStorages(ctx context.Context, c client.Client, namespace string, refs []corev1.LocalObjectReference) ([]dpv1alpha1.BackupStorage, error) {
+	storages := make([]dpv1alpha1.BackupStorage, 0, len(refs))
 	for _, ref := range refs {
-		repository, err := getBackupRepository(ctx, c, namespace, ref.Name)
+		storage, err := getBackupStorage(ctx, c, namespace, ref.Name)
 		if err != nil {
 			return nil, err
 		}
-		effectiveRepository, _, err := resolveEffectiveRepository(ctx, c, repository)
-		if err != nil {
-			return nil, err
+		if err := storage.Spec.ValidateBasic(); err != nil {
+			return nil, newPermanentDependencyError("referenced BackupStorage %q is invalid: %v", storage.Name, err)
 		}
-		repositories = append(repositories, *effectiveRepository)
+		storages = append(storages, *storage)
 	}
-	return repositories, nil
-}
-
-func resolveEffectiveRepository(ctx context.Context, c client.Client, repository *dpv1alpha1.BackupRepository) (*dpv1alpha1.BackupRepository, *dpv1alpha1.BackupStorage, error) {
-	if repository == nil {
-		return nil, nil, newPermanentDependencyError("backup repository cannot be nil")
-	}
-
-	effective := repository.DeepCopy()
-	repositoryPath := trimString(effective.Spec.Path)
-
-	if hasInlineRepositoryBackend(&effective.Spec) {
-		applyRepositoryPath(effective, repositoryPath)
-		return effective, nil, nil
-	}
-
-	storage, err := resolveRepositoryStorage(ctx, c, effective.Namespace, effective)
-	if err != nil {
-		return nil, nil, err
-	}
-	if err := storage.Spec.ValidateBasic(); err != nil {
-		return nil, storage, newPermanentDependencyError("referenced BackupStorage %q is invalid: %v", storage.Name, err)
-	}
-
-	effective.Spec.Type = storage.Spec.Type
-	effective.Spec.StorageRef = nil
-	effective.Spec.Default = effective.Spec.Default || storage.Spec.Default
-	effective.Spec.NFS = nil
-	effective.Spec.S3 = nil
-	if storage.Spec.NFS != nil {
-		effective.Spec.NFS = storage.Spec.NFS.DeepCopy()
-	}
-	if storage.Spec.S3 != nil {
-		effective.Spec.S3 = storage.Spec.S3.DeepCopy()
-	}
-	applyRepositoryPath(effective, repositoryPath)
-	return effective, storage, nil
-}
-
-func resolveRepositoryStorage(ctx context.Context, c client.Client, namespace string, repository *dpv1alpha1.BackupRepository) (*dpv1alpha1.BackupStorage, error) {
-	refName := localRefName(repository.Spec.StorageRef)
-	if refName != "" {
-		storage, err := getBackupStorage(ctx, c, namespace, refName)
-		if err != nil {
-			return nil, err
-		}
-		return storage, nil
-	}
-
-	var storageList dpv1alpha1.BackupStorageList
-	if err := c.List(ctx, &storageList, client.InNamespace(namespace)); err != nil {
-		return nil, err
-	}
-
-	defaults := make([]dpv1alpha1.BackupStorage, 0, len(storageList.Items))
-	for i := range storageList.Items {
-		if storageList.Items[i].Spec.Default {
-			defaults = append(defaults, storageList.Items[i])
-		}
-	}
-	switch len(defaults) {
-	case 0:
-		return nil, apierrors.NewNotFound(schema.GroupResource{
-			Group:    dpv1alpha1.GroupVersion.Group,
-			Resource: "backupstorages",
-		}, "default")
-	case 1:
-		return defaults[0].DeepCopy(), nil
-	default:
-		names := make([]string, 0, len(defaults))
-		for i := range defaults {
-			names = append(names, defaults[i].Name)
-		}
-		sort.Strings(names)
-		return nil, newPermanentDependencyError("multiple default BackupStorage resources found: %s", strings.Join(names, ", "))
-	}
-}
-
-func applyRepositoryPath(repository *dpv1alpha1.BackupRepository, repositoryPath string) {
-	if repository == nil || repositoryPath == "" {
-		return
-	}
-	switch repository.Spec.Type {
-	case dpv1alpha1.RepositoryTypeNFS:
-		if repository.Spec.NFS != nil {
-			repository.Spec.NFS.Path = joinStoragePath(repository.Spec.NFS.Path, repositoryPath)
-		}
-	case dpv1alpha1.RepositoryTypeS3:
-		if repository.Spec.S3 != nil {
-			repository.Spec.S3.Prefix = joinStoragePath(repository.Spec.S3.Prefix, repositoryPath)
-		}
-	}
-}
-
-func joinStoragePath(base, subPath string) string {
-	base = trimString(base)
-	subPath = trimString(subPath)
-	if base == "" {
-		return strings.Trim(subPath, "/")
-	}
-	if subPath == "" {
-		if strings.HasPrefix(base, "/") {
-			trimmed := strings.TrimRight(base, "/")
-			if trimmed == "" {
-				return "/"
-			}
-			return trimmed
-		}
-		return strings.Trim(base, "/")
-	}
-
-	leadingSlash := strings.HasPrefix(base, "/")
-	parts := []string{}
-	for _, part := range []string{base, subPath} {
-		part = strings.Trim(part, "/")
-		if part != "" {
-			parts = append(parts, part)
-		}
-	}
-	joined := strings.Join(parts, "/")
-	if leadingSlash {
-		return "/" + joined
-	}
-	return joined
+	return storages, nil
 }
 
 func resolveBackupRunRefs(ctx context.Context, c client.Client, run *dpv1alpha1.BackupRun) (*resolvedBackupRunRefs, error) {
@@ -270,61 +141,65 @@ func resolveBackupRunRefs(ctx context.Context, c client.Client, run *dpv1alpha1.
 	}
 	result.Source = source
 
-	repositoryRefs := run.Spec.RepositoryRefs
-	if len(repositoryRefs) == 0 && result.Policy != nil {
-		repositoryRefs = result.Policy.Spec.RepositoryRefs
+	storageRefs := run.Spec.StorageRefs
+	if len(storageRefs) == 0 && result.Policy != nil {
+		storageRefs = result.Policy.Spec.StorageRefs
 	}
-	repositories, err := resolveRepositories(ctx, c, run.Namespace, repositoryRefs)
+	storages, err := resolveStorages(ctx, c, run.Namespace, storageRefs)
 	if err != nil {
 		return nil, err
 	}
-	result.Repositories = repositories
+	result.Storages = storages
+	result.StoragePath = backupArtifactPath(source, result.Policy, run)
 	return result, nil
 }
 
-func resolveRestoreRepository(ctx context.Context, c client.Client, restore *dpv1alpha1.RestoreRequest) (*dpv1alpha1.BackupRun, *dpv1alpha1.Snapshot, *dpv1alpha1.BackupRepository, error) {
+func resolveRestoreStorage(
+	ctx context.Context,
+	c client.Client,
+	restore *dpv1alpha1.RestoreRequest,
+	source *dpv1alpha1.BackupSource,
+) (*dpv1alpha1.BackupRun, *dpv1alpha1.Snapshot, *dpv1alpha1.BackupStorage, string, error) {
 	var backupRun *dpv1alpha1.BackupRun
 	var snapshot *dpv1alpha1.Snapshot
 	if restore.Spec.BackupRunRef != nil && strings.TrimSpace(restore.Spec.BackupRunRef.Name) != "" {
 		resolvedRun, err := getBackupRun(ctx, c, restore.Namespace, restore.Spec.BackupRunRef.Name)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, "", err
 		}
 		backupRun = resolvedRun
 	}
 	if restore.Spec.SnapshotRef != nil && strings.TrimSpace(restore.Spec.SnapshotRef.Name) != "" {
 		resolvedSnapshot, err := getSnapshot(ctx, c, restore.Namespace, restore.Spec.SnapshotRef.Name)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, "", err
 		}
 		snapshot = resolvedSnapshot
 		if backupRun == nil && strings.TrimSpace(snapshot.Spec.BackupRunRef.Name) != "" {
 			resolvedRun, err := getBackupRun(ctx, c, restore.Namespace, snapshot.Spec.BackupRunRef.Name)
 			if err != nil {
-				return nil, nil, nil, err
+				return nil, nil, nil, "", err
 			}
 			backupRun = resolvedRun
 		}
 	}
 
-	repositoryName := ""
-	if restore.Spec.RepositoryRef != nil {
-		repositoryName = strings.TrimSpace(restore.Spec.RepositoryRef.Name)
+	storageName := ""
+	if restore.Spec.StorageRef != nil {
+		storageName = strings.TrimSpace(restore.Spec.StorageRef.Name)
 	}
-	if repositoryName == "" && snapshot != nil {
-		repositoryName = strings.TrimSpace(snapshot.Spec.RepositoryRef.Name)
+	if storageName == "" && snapshot != nil {
+		storageName = strings.TrimSpace(snapshot.Spec.StorageRef.Name)
 	}
-
-	if repositoryName == "" && backupRun != nil {
-		candidateNames := make([]string, 0, len(backupRun.Status.Repositories))
-		for _, repositoryStatus := range backupRun.Status.Repositories {
-			if strings.TrimSpace(repositoryStatus.Name) == "" {
-				continue
+	if storageName == "" && backupRun != nil {
+		candidateNames := make([]string, 0, len(backupRun.Status.Storages))
+		for _, storageStatus := range backupRun.Status.Storages {
+			if strings.TrimSpace(storageStatus.Name) != "" {
+				candidateNames = append(candidateNames, storageStatus.Name)
 			}
-			candidateNames = append(candidateNames, repositoryStatus.Name)
 		}
 		if len(candidateNames) == 0 {
-			for _, ref := range backupRun.Spec.RepositoryRefs {
+			for _, ref := range backupRun.Spec.StorageRefs {
 				if strings.TrimSpace(ref.Name) != "" {
 					candidateNames = append(candidateNames, ref.Name)
 				}
@@ -333,27 +208,70 @@ func resolveRestoreRepository(ctx context.Context, c client.Client, restore *dpv
 		candidateNames = uniqueStrings(candidateNames)
 		switch len(candidateNames) {
 		case 0:
-			return backupRun, snapshot, nil, newPermanentDependencyError("unable to determine repository from backupRun %q", backupRun.Name)
+			return backupRun, snapshot, nil, "", newPermanentDependencyError("unable to determine storage from backupRun %q", backupRun.Name)
 		case 1:
-			repositoryName = candidateNames[0]
+			storageName = candidateNames[0]
 		default:
-			return backupRun, snapshot, nil, newPermanentDependencyError("spec.repositoryRef is required because backupRun %q spans multiple repositories: %s", backupRun.Name, strings.Join(candidateNames, ", "))
+			return backupRun, snapshot, nil, "", newPermanentDependencyError("spec.storageRef is required because backupRun %q spans multiple storages: %s", backupRun.Name, strings.Join(candidateNames, ", "))
 		}
 	}
-
-	if repositoryName == "" {
-		return backupRun, snapshot, nil, newPermanentDependencyError("spec.repositoryRef is required")
+	if storageName == "" {
+		return backupRun, snapshot, nil, "", newPermanentDependencyError("spec.storageRef is required")
 	}
 
-	repository, err := getBackupRepository(ctx, c, restore.Namespace, repositoryName)
+	storage, err := getBackupStorage(ctx, c, restore.Namespace, storageName)
 	if err != nil {
-		return backupRun, snapshot, nil, err
+		return backupRun, snapshot, nil, "", err
 	}
-	effectiveRepository, _, err := resolveEffectiveRepository(ctx, c, repository)
-	if err != nil {
-		return backupRun, snapshot, nil, err
+	if err := storage.Spec.ValidateBasic(); err != nil {
+		return backupRun, snapshot, nil, "", newPermanentDependencyError("referenced BackupStorage %q is invalid: %v", storage.Name, err)
 	}
-	return backupRun, snapshot, effectiveRepository, nil
+
+	storagePath := trimString(restore.Spec.StoragePath)
+	if storagePath == "" && snapshot != nil {
+		storagePath = trimString(snapshot.Spec.StoragePath)
+	}
+	if storagePath == "" && backupRun != nil {
+		for _, storageStatus := range backupRun.Status.Storages {
+			if storageStatus.Name == storage.Name && trimString(storageStatus.StoragePath) != "" {
+				storagePath = trimString(storageStatus.StoragePath)
+				break
+			}
+		}
+	}
+	if storagePath == "" && backupRun != nil {
+		var policy *dpv1alpha1.BackupPolicy
+		if backupRun.Spec.PolicyRef != nil && strings.TrimSpace(backupRun.Spec.PolicyRef.Name) != "" {
+			policy, err = getBackupPolicy(ctx, c, backupRun.Namespace, backupRun.Spec.PolicyRef.Name)
+			if err != nil {
+				return backupRun, snapshot, nil, "", err
+			}
+		}
+		storagePath = backupArtifactPath(source, policy, backupRun)
+	}
+	if storagePath == "" {
+		return backupRun, snapshot, nil, "", newPermanentDependencyError("spec.storagePath is required when restoring from a raw snapshot without snapshotRef or backupRunRef")
+	}
+
+	return backupRun, snapshot, storage, storagePath, nil
+}
+
+// backupArtifactPath defines the stable layout for backup artifacts inside a
+// storage backend. Policies get a long-lived series path while standalone runs
+// write into their own run-scoped path.
+func backupArtifactPath(source *dpv1alpha1.BackupSource, policy *dpv1alpha1.BackupPolicy, run *dpv1alpha1.BackupRun) string {
+	parts := []string{
+		"backups",
+		dpv1alpha1.BuildLabelValue(string(source.Spec.Driver)),
+		dpv1alpha1.BuildLabelValue(source.Namespace),
+		dpv1alpha1.BuildLabelValue(source.Name),
+	}
+	if policy != nil {
+		parts = append(parts, "policies", dpv1alpha1.BuildLabelValue(policy.Name))
+	} else {
+		parts = append(parts, "runs", dpv1alpha1.BuildLabelValue(run.Name))
+	}
+	return strings.Join(parts, "/")
 }
 
 func defaultExecutionTemplate(spec dpv1alpha1.ExecutionTemplateSpec) dpv1alpha1.ExecutionTemplateSpec {
@@ -370,17 +288,16 @@ func defaultExecutionTemplate(spec dpv1alpha1.ExecutionTemplateSpec) dpv1alpha1.
 	return spec
 }
 
-func buildBackupCronJob(policy *dpv1alpha1.BackupPolicy, source *dpv1alpha1.BackupSource, repository *dpv1alpha1.BackupRepository, keepLast int32) (*batchv1.CronJob, error) {
-	if useBuiltInMySQLRuntime(source.Spec.Driver, policy.Spec.Execution) {
-		return buildBuiltInMySQLBackupCronJob(policy, source, repository, keepLast)
-	}
-
+// buildBackupCronJob renders a native Kubernetes CronJob that only creates a
+// BackupRun CR. The actual data movement remains in the BackupRun controller.
+func buildBackupCronJob(policy *dpv1alpha1.BackupPolicy, source *dpv1alpha1.BackupSource, storage *dpv1alpha1.BackupStorage) (*batchv1.CronJob, error) {
 	execution := defaultExecutionTemplate(policy.Spec.Execution)
-	name := dpv1alpha1.BuildCronJobName(policy.Name, repository.Name)
+	name := dpv1alpha1.BuildCronJobName(policy.Name, storage.Name)
 	suspended := policy.Spec.Suspend || policy.Spec.Schedule.Suspend
-	labels := managedResourceLabels("BackupPolicy", policy.Name, "scheduled-backup", source.Name, repository.Name)
-	annotations := map[string]string{}
-	annotations[placeholderAnnotation] = boolString(len(execution.Command) == 0 && len(execution.Args) == 0)
+	labels := managedResourceLabels("BackupPolicy", policy.Name, "scheduled-trigger", source.Name, storage.Name)
+	annotations := map[string]string{
+		"dataprotection.archinfra.io/schedule-model": "cronjob-backuprun",
+	}
 
 	return &batchv1.CronJob{
 		ObjectMeta: metav1.ObjectMeta{
@@ -401,13 +318,46 @@ func buildBackupCronJob(policy *dpv1alpha1.BackupPolicy, source *dpv1alpha1.Back
 					Labels:      copyStringMap(labels),
 					Annotations: copyStringMap(annotations),
 				},
-				Spec: buildJobSpec(execution, labels, buildBackupEnvVars(policy.Name, "", source, repository, policy.Spec.DriverConfig, policy.Spec.Execution.ExtraEnv, "", ""), "scheduled-backup"),
+				Spec: batchv1.JobSpec{
+					BackoffLimit: int32Ptr(1),
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{
+							Labels:      copyStringMap(labels),
+							Annotations: copyStringMap(annotations),
+						},
+						Spec: corev1.PodSpec{
+							RestartPolicy:      corev1.RestartPolicyNever,
+							ServiceAccountName: defaultTriggerServiceAccountName(),
+							Containers: []corev1.Container{
+								{
+									Name:            "backup-trigger",
+									Image:           defaultControllerImage(),
+									ImagePullPolicy: execution.ImagePullPolicy,
+									Args: []string{
+										"trigger-backup-run",
+										"--namespace=" + policy.Namespace,
+										"--policy=" + policy.Name,
+										"--storage=" + storage.Name,
+									},
+								},
+							},
+						},
+					},
+				},
 			},
 		},
 	}, nil
 }
 
-func buildBackupRunJob(run *dpv1alpha1.BackupRun, policy *dpv1alpha1.BackupPolicy, source *dpv1alpha1.BackupSource, repository *dpv1alpha1.BackupRepository, snapshot string, keepLast int32) (*batchv1.Job, error) {
+func buildBackupRunJob(
+	run *dpv1alpha1.BackupRun,
+	policy *dpv1alpha1.BackupPolicy,
+	source *dpv1alpha1.BackupSource,
+	storage *dpv1alpha1.BackupStorage,
+	storagePath string,
+	snapshot string,
+	keepLast int32,
+) (*batchv1.Job, error) {
 	execution := dpv1alpha1.ExecutionTemplateSpec{}
 	driverConfig := run.Spec.DriverConfig
 	if policy != nil {
@@ -415,13 +365,14 @@ func buildBackupRunJob(run *dpv1alpha1.BackupRun, policy *dpv1alpha1.BackupPolic
 		driverConfig = effectiveDriverConfig(policy.Spec.DriverConfig, run.Spec.DriverConfig)
 	}
 	if useBuiltInMySQLRuntime(source.Spec.Driver, execution) {
-		return buildBuiltInMySQLBackupRunJob(run, policy, source, repository, snapshot, keepLast)
+		return buildBuiltInMySQLBackupRunJob(run, policy, source, storage, storagePath, snapshot, keepLast)
 	}
 	execution = defaultExecutionTemplate(execution)
-	name := dpv1alpha1.BuildJobName(run.Name, repository.Name)
-	labels := managedResourceLabels("BackupRun", run.Name, "manual-backup", source.Name, repository.Name)
+	name := dpv1alpha1.BuildJobName(run.Name, storage.Name)
+	labels := managedResourceLabels("BackupRun", run.Name, "manual-backup", source.Name, storage.Name)
 	annotations := map[string]string{
 		snapshotAnnotation:    snapshot,
+		storagePathAnnotation: storagePath,
 		placeholderAnnotation: boolString(len(execution.Command) == 0 && len(execution.Args) == 0),
 	}
 	if reason := strings.TrimSpace(run.Spec.Reason); reason != "" {
@@ -435,20 +386,29 @@ func buildBackupRunJob(run *dpv1alpha1.BackupRun, policy *dpv1alpha1.BackupPolic
 			Labels:      labels,
 			Annotations: annotations,
 		},
-		Spec: buildJobSpec(execution, labels, buildBackupEnvVars("", run.Name, source, repository, driverConfig, execution.ExtraEnv, snapshot, strings.TrimSpace(run.Spec.Reason)), "manual-backup"),
+		Spec: buildJobSpec(execution, labels, buildBackupEnvVars("", run.Name, source, storage, storagePath, driverConfig, execution.ExtraEnv, snapshot, strings.TrimSpace(run.Spec.Reason)), "manual-backup"),
 	}, nil
 }
 
-func buildRestoreJob(restore *dpv1alpha1.RestoreRequest, backupRun *dpv1alpha1.BackupRun, source *dpv1alpha1.BackupSource, repository *dpv1alpha1.BackupRepository, execution dpv1alpha1.ExecutionTemplateSpec, snapshot string) (*batchv1.Job, error) {
+func buildRestoreJob(
+	restore *dpv1alpha1.RestoreRequest,
+	backupRun *dpv1alpha1.BackupRun,
+	source *dpv1alpha1.BackupSource,
+	storage *dpv1alpha1.BackupStorage,
+	storagePath string,
+	execution dpv1alpha1.ExecutionTemplateSpec,
+	snapshot string,
+) (*batchv1.Job, error) {
 	if useBuiltInMySQLRuntime(source.Spec.Driver, execution) {
-		return buildBuiltInMySQLRestoreJob(restore, backupRun, source, repository, execution, snapshot)
+		return buildBuiltInMySQLRestoreJob(restore, backupRun, source, storage, storagePath, execution, snapshot)
 	}
 	execution = defaultExecutionTemplate(execution)
 	name := dpv1alpha1.BuildJobName(restore.Name, "restore")
-	labels := managedResourceLabels("RestoreRequest", restore.Name, "restore", source.Name, repository.Name)
+	labels := managedResourceLabels("RestoreRequest", restore.Name, "restore", source.Name, storage.Name)
 	annotations := map[string]string{
 		snapshotAnnotation:    snapshot,
 		targetModeAnnotation:  string(effectiveRestoreTargetMode(restore.Spec.Target.Mode)),
+		storagePathAnnotation: storagePath,
 		placeholderAnnotation: boolString(len(execution.Command) == 0 && len(execution.Args) == 0),
 	}
 	if reason := strings.TrimSpace(restore.Spec.Reason); reason != "" {
@@ -462,7 +422,7 @@ func buildRestoreJob(restore *dpv1alpha1.RestoreRequest, backupRun *dpv1alpha1.B
 			Labels:      labels,
 			Annotations: annotations,
 		},
-		Spec: buildJobSpec(execution, labels, buildRestoreEnvVars(restore, backupRun, source, repository, snapshot), "restore"),
+		Spec: buildJobSpec(execution, labels, buildRestoreEnvVars(restore, backupRun, source, storage, storagePath, snapshot), "restore"),
 	}, nil
 }
 
@@ -507,13 +467,22 @@ func buildPodSpec(execution dpv1alpha1.ExecutionTemplateSpec, env []corev1.EnvVa
 	}
 }
 
-func buildBackupEnvVars(policyName, runName string, source *dpv1alpha1.BackupSource, repository *dpv1alpha1.BackupRepository, driverConfig dpv1alpha1.DriverConfig, extraEnv []corev1.EnvVar, snapshot, reason string) []corev1.EnvVar {
+func buildBackupEnvVars(
+	policyName, runName string,
+	source *dpv1alpha1.BackupSource,
+	storage *dpv1alpha1.BackupStorage,
+	storagePath string,
+	driverConfig dpv1alpha1.DriverConfig,
+	extraEnv []corev1.EnvVar,
+	snapshot, reason string,
+) []corev1.EnvVar {
 	envs := []corev1.EnvVar{
 		{Name: "DP_OPERATION", Value: "backup"},
 		{Name: "DP_SOURCE_NAME", Value: source.Name},
 		{Name: "DP_SOURCE_DRIVER", Value: string(source.Spec.Driver)},
-		{Name: "DP_REPOSITORY_NAME", Value: repository.Name},
-		{Name: "DP_REPOSITORY_TYPE", Value: string(repository.Spec.Type)},
+		{Name: "DP_STORAGE_NAME", Value: storage.Name},
+		{Name: "DP_STORAGE_TYPE", Value: string(storage.Spec.Type)},
+		{Name: "DP_STORAGE_PATH", Value: storagePath},
 	}
 	if policyName != "" {
 		envs = append(envs, corev1.EnvVar{Name: "DP_POLICY_NAME", Value: policyName})
@@ -528,18 +497,25 @@ func buildBackupEnvVars(policyName, runName string, source *dpv1alpha1.BackupSou
 		envs = append(envs, corev1.EnvVar{Name: "DP_REASON", Value: reason})
 	}
 	envs = append(envs, endpointEnvVars("DP_SOURCE", source.Spec.Endpoint)...)
-	envs = append(envs, repositoryEnvVars(repository)...)
+	envs = append(envs, storageEnvVars(storage)...)
 	envs = append(envs, driverConfigEnvVars(driverConfig)...)
 	return mergeEnvVars(envs, extraEnv)
 }
 
-func buildRestoreEnvVars(restore *dpv1alpha1.RestoreRequest, backupRun *dpv1alpha1.BackupRun, source *dpv1alpha1.BackupSource, repository *dpv1alpha1.BackupRepository, snapshot string) []corev1.EnvVar {
+func buildRestoreEnvVars(
+	restore *dpv1alpha1.RestoreRequest,
+	backupRun *dpv1alpha1.BackupRun,
+	source *dpv1alpha1.BackupSource,
+	storage *dpv1alpha1.BackupStorage,
+	storagePath, snapshot string,
+) []corev1.EnvVar {
 	envs := []corev1.EnvVar{
 		{Name: "DP_OPERATION", Value: "restore"},
 		{Name: "DP_SOURCE_NAME", Value: source.Name},
 		{Name: "DP_SOURCE_DRIVER", Value: string(source.Spec.Driver)},
-		{Name: "DP_REPOSITORY_NAME", Value: repository.Name},
-		{Name: "DP_REPOSITORY_TYPE", Value: string(repository.Spec.Type)},
+		{Name: "DP_STORAGE_NAME", Value: storage.Name},
+		{Name: "DP_STORAGE_TYPE", Value: string(storage.Spec.Type)},
+		{Name: "DP_STORAGE_PATH", Value: storagePath},
 		{Name: "DP_RESTORE_REQUEST_NAME", Value: restore.Name},
 		{Name: "DP_RESTORE_TARGET_MODE", Value: string(effectiveRestoreTargetMode(restore.Spec.Target.Mode))},
 	}
@@ -553,7 +529,7 @@ func buildRestoreEnvVars(restore *dpv1alpha1.RestoreRequest, backupRun *dpv1alph
 		envs = append(envs, corev1.EnvVar{Name: "DP_REASON", Value: reason})
 	}
 	envs = append(envs, endpointEnvVars("DP_SOURCE", source.Spec.Endpoint)...)
-	envs = append(envs, repositoryEnvVars(repository)...)
+	envs = append(envs, storageEnvVars(storage)...)
 	if restore.Spec.Target.Endpoint != nil {
 		envs = append(envs, endpointEnvVars("DP_TARGET", *restore.Spec.Target.Endpoint)...)
 	}
@@ -588,28 +564,28 @@ func endpointEnvVars(prefix string, endpoint dpv1alpha1.EndpointSpec) []corev1.E
 	return envs
 }
 
-func repositoryEnvVars(repository *dpv1alpha1.BackupRepository) []corev1.EnvVar {
+func storageEnvVars(storage *dpv1alpha1.BackupStorage) []corev1.EnvVar {
 	envs := []corev1.EnvVar{}
-	switch repository.Spec.Type {
-	case dpv1alpha1.RepositoryTypeNFS:
-		if repository.Spec.NFS != nil {
+	switch storage.Spec.Type {
+	case dpv1alpha1.StorageTypeNFS:
+		if storage.Spec.NFS != nil {
 			envs = append(envs,
-				corev1.EnvVar{Name: "DP_REPOSITORY_NFS_SERVER", Value: repository.Spec.NFS.Server},
-				corev1.EnvVar{Name: "DP_REPOSITORY_NFS_PATH", Value: repository.Spec.NFS.Path},
+				corev1.EnvVar{Name: "DP_STORAGE_NFS_SERVER", Value: storage.Spec.NFS.Server},
+				corev1.EnvVar{Name: "DP_STORAGE_NFS_PATH", Value: storage.Spec.NFS.Path},
 			)
 		}
-	case dpv1alpha1.RepositoryTypeS3:
-		if repository.Spec.S3 != nil {
+	case dpv1alpha1.StorageTypeS3:
+		if storage.Spec.S3 != nil {
 			envs = append(envs,
-				corev1.EnvVar{Name: "DP_REPOSITORY_S3_ENDPOINT", Value: repository.Spec.S3.Endpoint},
-				corev1.EnvVar{Name: "DP_REPOSITORY_S3_BUCKET", Value: repository.Spec.S3.Bucket},
-				corev1.EnvVar{Name: "DP_REPOSITORY_S3_PREFIX", Value: repository.Spec.S3.Prefix},
-				corev1.EnvVar{Name: "DP_REPOSITORY_S3_REGION", Value: repository.Spec.S3.Region},
-				corev1.EnvVar{Name: "DP_REPOSITORY_S3_INSECURE", Value: boolString(repository.Spec.S3.Insecure)},
+				corev1.EnvVar{Name: "DP_STORAGE_S3_ENDPOINT", Value: storage.Spec.S3.Endpoint},
+				corev1.EnvVar{Name: "DP_STORAGE_S3_BUCKET", Value: storage.Spec.S3.Bucket},
+				corev1.EnvVar{Name: "DP_STORAGE_S3_PREFIX", Value: storage.Spec.S3.Prefix},
+				corev1.EnvVar{Name: "DP_STORAGE_S3_REGION", Value: storage.Spec.S3.Region},
+				corev1.EnvVar{Name: "DP_STORAGE_S3_INSECURE", Value: boolString(storage.Spec.S3.Insecure)},
 			)
-			envs = appendSecretEnvVar(envs, "DP_REPOSITORY_S3_ACCESS_KEY", repository.Spec.S3.AccessKeyFrom)
-			envs = appendSecretEnvVar(envs, "DP_REPOSITORY_S3_SECRET_KEY", repository.Spec.S3.SecretKeyFrom)
-			envs = appendSecretEnvVar(envs, "DP_REPOSITORY_S3_SESSION_TOKEN", repository.Spec.S3.SessionTokenRef)
+			envs = appendSecretEnvVar(envs, "DP_STORAGE_S3_ACCESS_KEY", storage.Spec.S3.AccessKeyFrom)
+			envs = appendSecretEnvVar(envs, "DP_STORAGE_S3_SECRET_KEY", storage.Spec.S3.SecretKeyFrom)
+			envs = appendSecretEnvVar(envs, "DP_STORAGE_S3_SESSION_TOKEN", storage.Spec.S3.SessionTokenRef)
 		}
 	}
 	return envs
@@ -667,7 +643,7 @@ func driverConfigEnvVars(driverConfig dpv1alpha1.DriverConfig) []corev1.EnvVar {
 	return envs
 }
 
-func managedResourceLabels(ownerKind, ownerName, operation, sourceName, repositoryName string) map[string]string {
+func managedResourceLabels(ownerKind, ownerName, operation, sourceName, storageName string) map[string]string {
 	labels := map[string]string{
 		managedByLabel:    managedByValue,
 		resourceKindLabel: ownerKind,
@@ -675,8 +651,8 @@ func managedResourceLabels(ownerKind, ownerName, operation, sourceName, reposito
 		operationLabel:    operation,
 		sourceNameLabel:   dpv1alpha1.BuildLabelValue(sourceName),
 	}
-	if strings.TrimSpace(repositoryName) != "" {
-		labels[repositoryNameLabel] = dpv1alpha1.BuildLabelValue(repositoryName)
+	if strings.TrimSpace(storageName) != "" {
+		labels[storageNameLabel] = dpv1alpha1.BuildLabelValue(storageName)
 	}
 	return labels
 }
@@ -816,7 +792,7 @@ func placeholderScript(operation string) string {
 		"echo \"data-protection operator placeholder runner\"",
 		"echo \"operation=" + operation + "\"",
 		"echo \"source=${DP_SOURCE_NAME:-}\"",
-		"echo \"repository=${DP_REPOSITORY_NAME:-}\"",
+		"echo \"storage=${DP_STORAGE_NAME:-}\"",
 		"echo \"snapshot=${DP_SNAPSHOT:-}\"",
 		"date -u +\"%Y-%m-%dT%H:%M:%SZ\"",
 	}, "\n")

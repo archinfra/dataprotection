@@ -1,100 +1,105 @@
-﻿# Data Protection Operator 开发说明
+# Data Protection Operator 开发说明
 
-## 1. 仓库定位
+## 仓库定位
 
-这个仓库已经从 MySQL 项目中独立出来，目标是承载一个通用的数据保护控制面：
+这个仓库承载的是数据保护控制面，而不是单一数据库脚本工程。
 
-- 通用控制面：备份源、备份仓库、备份计划、手工备份、恢复请求
-- 统一执行模型：`BackupPolicy -> CronJob`，`BackupRun/RestoreRequest -> Job`
-- 可扩展数据面：先落 MySQL，后续再接 Redis、MongoDB、MinIO、RabbitMQ、Milvus
+当前核心模型已经稳定在下面这几类对象：
 
-当前仓库地址约定为：
+- `BackupSource`
+- `BackupStorage`
+- `BackupPolicy`
+- `BackupRun`
+- `Snapshot`
+- `RestoreRequest`
+- `RetentionPolicy`
 
-- `https://github.com/archinfra/dataprotection.git`
+其中最重要的设计取舍是：
 
-Go module 为：
+- 调度交给 Kubernetes `CronJob`
+- 执行历史交给 `BackupRun`
+- 备份资产交给 `Snapshot`
+- 真正的数据动作放进 `Job`
 
-- `github.com/archinfra/dataprotection`
+## 当前主链路
 
-## 2. 当前工程结构
+### 定时备份
+
+```text
+BackupPolicy -> CronJob -> trigger-backup-run -> BackupRun -> Job -> Snapshot
+```
+
+### 手工备份
+
+```text
+BackupRun -> Job -> Snapshot
+```
+
+### 恢复
+
+```text
+RestoreRequest -> resolve snapshot/storage/path -> Job
+```
+
+## 目录说明
 
 - `api/v1alpha1`
-  负责 CRD 类型、命名规则、字段校验。
+  API 类型、字段校验、命名规则
 - `controllers`
-  负责 controller、幂等编排、状态回填，以及内建 runtime。
+  controller、状态回填、公共渲染逻辑、内建 runtime
 - `config/crd/bases`
-  `controller-gen` 生成后的 CRD 清单。
+  生成后的 CRD
 - `config/samples`
-  样例 CRD。
+  当前推荐样例
 - `manifests`
-  operator 安装模板。
+  operator 安装模板
 - `scripts/install`
-  `.run` 离线安装器源码。
-- `.github/workflows`
-  CI、镜像发布、离线安装包构建。
+  离线安装器源码
 
-## 3. 当前闭环
+## 最关键的代码入口
 
-已经跑通的主链路：
+- [main.go](/C:/Users/admin/Desktop/release/dataprotection/main.go)
+  operator 启动入口
+- [trigger_backuprun.go](/C:/Users/admin/Desktop/release/dataprotection/trigger_backuprun.go)
+  `CronJob -> BackupRun` 触发桥接
+- [controllers/backuppolicy_controller.go](/C:/Users/admin/Desktop/release/dataprotection/controllers/backuppolicy_controller.go)
+  调度层
+- [controllers/backuprun_controller.go](/C:/Users/admin/Desktop/release/dataprotection/controllers/backuprun_controller.go)
+  执行层与快照层
+- [controllers/restorerequest_controller.go](/C:/Users/admin/Desktop/release/dataprotection/controllers/restorerequest_controller.go)
+  恢复层
+- [controllers/runtime_helpers.go](/C:/Users/admin/Desktop/release/dataprotection/controllers/runtime_helpers.go)
+  公共依赖解析和 storage path 规则
+- [controllers/mysql_runtime.go](/C:/Users/admin/Desktop/release/dataprotection/controllers/mysql_runtime.go)
+  MySQL 内建数据面
 
-- `BackupSource` / `BackupRepository` 状态回填
-- `BackupPolicy -> CronJob`
-- `BackupRun -> Job`
-- `RestoreRequest -> Job`
-- 子 `Job` 状态聚合回 CRD
-- MySQL + NFS
-- MySQL + S3 / MinIO
+## 为什么不用 controller 直接定时触发 Job
 
-## 4. MySQL 内建 Runtime 说明
+因为那样会把两件事耦在一起：
 
-位置：
+- 调度
+- 执行历史
 
-- `controllers/mysql_runtime.go`
+现在的实现把它们拆开了：
 
-设计原则：
+- `CronJob` 负责“按时触发”
+- `BackupRun` 负责“记录这一次执行”
+- `Job` 负责“做这一次数据动作”
 
-- 控制面继续用 Go controller 保证幂等、可观测和长期维护
-- 数据面在 `Job` 里执行，避免把所有备份恢复逻辑塞进 controller 进程
-- 对外暴露为“内建 runtime”，必要时仍允许用户通过 `execution.command/args` 覆盖
+这比 controller 自己算时间更好维护，也更接近 Stash 的成熟思路。
 
-当前已支持：
+## Storage 路径规则
 
-- `mysqldump` 逻辑备份
-- `.sql.gz` 恢复
-- NFS 仓库
-- S3 / MinIO 仓库
-- 指定库
-- 指定表
-- `merge`
-- `wipe-all-user-databases`
-- 校验和
-- 保留策略
+当前不再保留 `BackupRepository` 这层对象，统一由控制器计算稳定路径：
 
-## 5. 默认镜像策略
+- policy 备份：
+  `backups/<driver>/<namespace>/<source>/policies/<policy>`
+- 手工 run：
+  `backups/<driver>/<namespace>/<source>/runs/<run>`
 
-Controller 运行时默认镜像已经做成 Deployment 环境变量可配置：
+这条规则由 [controllers/runtime_helpers.go](/C:/Users/admin/Desktop/release/dataprotection/controllers/runtime_helpers.go) 中的 `backupArtifactPath()` 维护。
 
-- `DP_DEFAULT_RUNNER_IMAGE`
-- `DP_DEFAULT_MYSQL_RUNNER_IMAGE`
-- `DP_DEFAULT_S3_HELPER_IMAGE`
-
-这样有两个好处：
-
-- 在线安装时，可以直接指向 GitHub Actions 推送到 Docker Hub / 阿里云的镜像
-- 离线安装时，可以由 `.run` 安装器渲染成目标私有仓库地址
-
-## 6. 开发流程
-
-推荐顺序：
-
-1. 修改 API 或 controller
-2. 运行 `make generate`
-3. 运行 `make manifests`
-4. 运行 `make test`
-5. 运行 `make build`
-6. 如需手工调试安装器，再运行 `bash build.sh --arch amd64`，但正式产包推荐走 GitHub Actions
-
-常用命令：
+## 本地开发命令
 
 ```bash
 bash hack/bootstrap-dev-env.sh
@@ -103,29 +108,32 @@ make generate
 make manifests
 make test
 make build
-bash build.sh --arch amd64
 ```
 
-## 7. GitHub Actions 约定
+## 改 API / controller 后的推荐顺序
 
-`ci.yml` 负责：
+1. 修改 Go 代码
+2. 运行 `make fmt`
+3. 运行 `make generate`
+4. 运行 `make manifests`
+5. 运行 `make test`
+6. 如需离线包，再跑 `bash build.sh --arch amd64`
 
-- 生成代码
-- 生成 CRD
-- 单测
-- 安装器拼装 smoke test
+## 当前默认镜像环境变量
 
-`release.yml` 负责：
+operator Deployment 会注入这些默认镜像：
 
-- 构建并推送多架构 operator 镜像
-- 镜像同步到 Docker Hub 与阿里云
-- 构建 `amd64` / `arm64` 的 `.run` 包
-- tag 场景下附加到 GitHub Release
+- `DP_DEFAULT_RUNNER_IMAGE`
+- `DP_DEFAULT_MYSQL_RUNNER_IMAGE`
+- `DP_DEFAULT_S3_HELPER_IMAGE`
+- `DP_DEFAULT_CONTROLLER_IMAGE`
+- `DP_DEFAULT_TRIGGER_SERVICE_ACCOUNT`
 
-## 8. 工程约束
+其中 `DP_DEFAULT_CONTROLLER_IMAGE` 专门用于 `CronJob` 里的触发容器。
 
-- controller 必须优先保证重入安全和幂等
-- `BackupRun` / `RestoreRequest` 属于请求型资源，状态必须可审计
-- 配置错误要尽量落成清晰的失败状态，而不是静默重试
-- 安装器默认卸载 controller，不默认删 CRD，避免误删历史对象
+## 给后续维护者的建议
 
+- 先看 README，再看 `runtime_helpers.go`
+- 想改调度链路，优先改 `BackupPolicy` 和 `trigger_backuprun.go`
+- 想改执行链路，优先改 `BackupRun` controller 和对应 runtime
+- 想新增 driver，不要先碰调度层，先把数据面做成独立 runtime

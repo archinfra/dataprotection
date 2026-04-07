@@ -18,10 +18,12 @@ rules:
       - dataprotection.archinfra.io
     resources:
       - backuppolicies
-      - backuprepositories
       - backupruns
       - backupsources
+      - backupstorages
       - restorerequests
+      - retentionpolicies
+      - snapshots
     verbs:
       - create
       - delete
@@ -34,10 +36,12 @@ rules:
       - dataprotection.archinfra.io
     resources:
       - backuppolicies/status
-      - backuprepositories/status
       - backupruns/status
       - backupsources/status
+      - backupstorages/status
       - restorerequests/status
+      - retentionpolicies/status
+      - snapshots/status
     verbs:
       - get
       - patch
@@ -124,6 +128,10 @@ spec:
               value: {{MYSQL_RUNNER_IMAGE}}
             - name: DP_DEFAULT_S3_HELPER_IMAGE
               value: {{S3_HELPER_IMAGE}}
+            - name: DP_DEFAULT_CONTROLLER_IMAGE
+              value: {{OPERATOR_IMAGE}}
+            - name: DP_DEFAULT_TRIGGER_SERVICE_ACCOUNT
+              value: data-protection-operator-controller-manager
           ports:
             - name: metrics
               containerPort: 8080
@@ -160,4 +168,3 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
-

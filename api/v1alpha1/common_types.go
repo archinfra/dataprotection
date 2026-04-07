@@ -18,12 +18,12 @@ const (
 	BackupDriverMilvus   BackupDriver = "milvus"
 )
 
-// RepositoryType 定义备份存储库的类型
-type RepositoryType string
+// StorageType identifies the concrete backend used by a BackupStorage.
+type StorageType string
 
 const (
-	RepositoryTypeNFS RepositoryType = "nfs"
-	RepositoryTypeS3  RepositoryType = "s3"
+	StorageTypeNFS StorageType = "nfs"
+	StorageTypeS3  StorageType = "s3"
 )
 
 // ResourcePhase 定义资源当前的生命周期阶段
@@ -246,22 +246,22 @@ type MilvusDriverConfig struct {
 	IncludeObjectStorage bool `json:"includeObjectStorage,omitempty"`
 }
 
-// RepositoryEndpointSpec 定义备份存储库的路径（适用于 NFS 或 S3 前缀）
-type RepositoryEndpointSpec struct {
+// StoragePathSpec describes a relative path inside a storage backend.
+type StoragePathSpec struct {
 	// Path 存储库中的基本路径（目录或前缀）
 	Path string `json:"path,omitempty"`
 }
 
-// NFSRepositorySpec NFS 类型的存储库配置
-type NFSRepositorySpec struct {
+// NFSStorageSpec stores reusable NFS backend connection details.
+type NFSStorageSpec struct {
 	// Server NFS 服务器地址（IP 或主机名）
 	Server string `json:"server"`
 	// Path NFS 导出的共享路径
 	Path string `json:"path"`
 }
 
-// S3RepositorySpec S3 兼容对象存储的配置
-type S3RepositorySpec struct {
+// S3StorageSpec stores reusable S3-compatible backend connection details.
+type S3StorageSpec struct {
 	// Endpoint S3 服务端点（如 https://s3.amazonaws.com 或 http://minio:9000）
 	Endpoint string `json:"endpoint"`
 	// Bucket 存储桶名称
@@ -292,14 +292,16 @@ type RestoreTargetSpec struct {
 	DriverConfig DriverConfig `json:"driverConfig,omitempty"`
 }
 
-// RepositoryRunStatus 记录一次备份或恢复执行的运行时状态
-type RepositoryRunStatus struct {
-	// Name 关联的 Job 名称或执行 ID
+// StorageRunStatus records one storage-specific execution branch within a run.
+type StorageRunStatus struct {
+	// Name 对应的 BackupStorage 名称
 	Name string `json:"name,omitempty"`
 	// Phase 当前执行阶段（Pending/Running/Succeeded/Failed）
 	Phase ResourcePhase `json:"phase,omitempty"`
 	// Message 人类可读的状态详情或错误信息
 	Message string `json:"message,omitempty"`
+	// StoragePath 记录这次执行最终写入的存储路径
+	StoragePath string `json:"storagePath,omitempty"`
 	// Snapshot 备份产出物的标识（如 S3 路径或快照 ID）
 	Snapshot string `json:"snapshot,omitempty"`
 	// SnapshotRef 对应的 Snapshot CR 名称

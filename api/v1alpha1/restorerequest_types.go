@@ -6,13 +6,19 @@ import (
 )
 
 type RestoreRequestSpec struct {
-	SourceRef     corev1.LocalObjectReference  `json:"sourceRef"`
-	BackupRunRef  *corev1.LocalObjectReference `json:"backupRunRef,omitempty"`
-	SnapshotRef   *corev1.LocalObjectReference `json:"snapshotRef,omitempty"`
-	RepositoryRef *corev1.LocalObjectReference `json:"repositoryRef,omitempty"`
-	Snapshot      string                       `json:"snapshot,omitempty"`
-	Target        RestoreTargetSpec            `json:"target,omitempty"`
-	Reason        string                       `json:"reason,omitempty"`
+	SourceRef    corev1.LocalObjectReference  `json:"sourceRef"`
+	BackupRunRef *corev1.LocalObjectReference `json:"backupRunRef,omitempty"`
+	// SnapshotRef is the preferred restore entrypoint because it carries both
+	// the storage identity and the resolved storage path.
+	SnapshotRef *corev1.LocalObjectReference `json:"snapshotRef,omitempty"`
+	// StorageRef is only needed for raw restores that do not point at a
+	// snapshot or a single-storage BackupRun.
+	StorageRef *corev1.LocalObjectReference `json:"storageRef,omitempty"`
+	// StoragePath is the effective path inside the selected storage backend.
+	StoragePath string            `json:"storagePath,omitempty"`
+	Snapshot    string            `json:"snapshot,omitempty"`
+	Target      RestoreTargetSpec `json:"target,omitempty"`
+	Reason      string            `json:"reason,omitempty"`
 }
 
 type RestoreRequestStatus struct {

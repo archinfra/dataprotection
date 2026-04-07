@@ -443,58 +443,7 @@ mc_cmd ls "backup/${remote_path}" >/dev/null 2>&1 || {
 mc_cmd mirror "backup/${remote_path}" "${local_dir}"
 echo "[INFO] s3 download completed from ${remote_path}"`
 
-func buildBuiltInMySQLBackupCronJob(policy *dpv1alpha1.BackupPolicy, source *dpv1alpha1.BackupSource, repository *dpv1alpha1.BackupRepository, keepLast int32) (*batchv1.CronJob, error) {
-	execution := defaultMySQLExecutionTemplate(policy.Spec.Execution)
-	componentPath := mysqlComponentPath(policy.Namespace, source.Name)
-	driverConfig := effectiveMySQLDriverConfig(source.Spec.DriverConfig, policy.Spec.DriverConfig, dpv1alpha1.DriverConfig{})
-	podSpec, err := buildBuiltInMySQLBackupPodSpec(execution, source, repository, componentPath, driverConfig, "", keepLast, true)
-	if err != nil {
-		return nil, err
-	}
-
-	name := dpv1alpha1.BuildCronJobName(policy.Name, repository.Name)
-	suspended := policy.Spec.Suspend || policy.Spec.Schedule.Suspend
-	labels := managedResourceLabels("BackupPolicy", policy.Name, "scheduled-backup", source.Name, repository.Name)
-	annotations := map[string]string{
-		"dataprotection.archinfra.io/driver-runtime": "builtin-mysql",
-	}
-
-	return &batchv1.CronJob{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:        name,
-			Namespace:   policy.Namespace,
-			Labels:      labels,
-			Annotations: annotations,
-		},
-		Spec: batchv1.CronJobSpec{
-			Schedule:                   policy.Spec.Schedule.Cron,
-			Suspend:                    boolPtr(suspended),
-			ConcurrencyPolicy:          policy.Spec.EffectiveConcurrencyPolicy(),
-			StartingDeadlineSeconds:    cloneInt64Ptr(policy.Spec.Schedule.StartingDeadlineSeconds),
-			SuccessfulJobsHistoryLimit: int32Ptr(3),
-			FailedJobsHistoryLimit:     int32Ptr(3),
-			JobTemplate: batchv1.JobTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels:      copyStringMap(labels),
-					Annotations: copyStringMap(annotations),
-				},
-				Spec: batchv1.JobSpec{
-					BackoffLimit:            cloneInt32Ptr(execution.BackoffLimit),
-					TTLSecondsAfterFinished: cloneInt32Ptr(execution.TTLSecondsAfterFinished),
-					Template: corev1.PodTemplateSpec{
-						ObjectMeta: metav1.ObjectMeta{
-							Labels:      copyStringMap(labels),
-							Annotations: copyStringMap(annotations),
-						},
-						Spec: podSpec,
-					},
-				},
-			},
-		},
-	}, nil
-}
-
-func buildBuiltInMySQLBackupRunJob(run *dpv1alpha1.BackupRun, policy *dpv1alpha1.BackupPolicy, source *dpv1alpha1.BackupSource, repository *dpv1alpha1.BackupRepository, snapshot string, keepLast int32) (*batchv1.Job, error) {
+func buildBuiltInMySQLBackupRunJob(run *dpv1alpha1.BackupRun, policy *dpv1alpha1.BackupPolicy, source *dpv1alpha1.BackupSource, storage *dpv1alpha1.BackupStorage, storagePath string, snapshot string, keepLast int32) (*batchv1.Job, error) {
 	execution := dpv1alpha1.ExecutionTemplateSpec{}
 	policyDriverConfig := dpv1alpha1.DriverConfig{}
 	if policy != nil {
@@ -503,16 +452,16 @@ func buildBuiltInMySQLBackupRunJob(run *dpv1alpha1.BackupRun, policy *dpv1alpha1
 	}
 	execution = defaultMySQLExecutionTemplate(execution)
 	driverConfig := effectiveMySQLDriverConfig(source.Spec.DriverConfig, policyDriverConfig, run.Spec.DriverConfig)
-	componentPath := mysqlComponentPath(run.Namespace, source.Name)
-	podSpec, err := buildBuiltInMySQLBackupPodSpec(execution, source, repository, componentPath, driverConfig, snapshot, keepLast, false)
+	podSpec, err := buildBuiltInMySQLBackupPodSpec(execution, source, storage, storagePath, driverConfig, snapshot, keepLast)
 	if err != nil {
 		return nil, err
 	}
 
-	name := dpv1alpha1.BuildJobName(run.Name, repository.Name)
-	labels := managedResourceLabels("BackupRun", run.Name, "manual-backup", source.Name, repository.Name)
+	name := dpv1alpha1.BuildJobName(run.Name, storage.Name)
+	labels := managedResourceLabels("BackupRun", run.Name, "manual-backup", source.Name, storage.Name)
 	annotations := map[string]string{
 		snapshotAnnotation:                           ensureMySQLSnapshotFile(snapshot),
+		storagePathAnnotation:                        storagePath,
 		"dataprotection.archinfra.io/driver-runtime": "builtin-mysql",
 	}
 	if reason := strings.TrimSpace(run.Spec.Reason); reason != "" {
@@ -540,20 +489,20 @@ func buildBuiltInMySQLBackupRunJob(run *dpv1alpha1.BackupRun, policy *dpv1alpha1
 	}, nil
 }
 
-func buildBuiltInMySQLRestoreJob(restore *dpv1alpha1.RestoreRequest, backupRun *dpv1alpha1.BackupRun, source *dpv1alpha1.BackupSource, repository *dpv1alpha1.BackupRepository, execution dpv1alpha1.ExecutionTemplateSpec, snapshot string) (*batchv1.Job, error) {
+func buildBuiltInMySQLRestoreJob(restore *dpv1alpha1.RestoreRequest, backupRun *dpv1alpha1.BackupRun, source *dpv1alpha1.BackupSource, storage *dpv1alpha1.BackupStorage, storagePath string, execution dpv1alpha1.ExecutionTemplateSpec, snapshot string) (*batchv1.Job, error) {
 	execution = defaultMySQLExecutionTemplate(execution)
-	componentPath := mysqlComponentPath(restore.Namespace, source.Name)
 	driverConfig := effectiveMySQLDriverConfig(source.Spec.DriverConfig, dpv1alpha1.DriverConfig{}, restore.Spec.Target.DriverConfig)
-	podSpec, err := buildBuiltInMySQLRestorePodSpec(execution, restore, source, repository, componentPath, driverConfig, snapshot)
+	podSpec, err := buildBuiltInMySQLRestorePodSpec(execution, restore, source, storage, storagePath, driverConfig, snapshot)
 	if err != nil {
 		return nil, err
 	}
 
 	name := dpv1alpha1.BuildJobName(restore.Name, "restore")
-	labels := managedResourceLabels("RestoreRequest", restore.Name, "restore", source.Name, repository.Name)
+	labels := managedResourceLabels("RestoreRequest", restore.Name, "restore", source.Name, storage.Name)
 	annotations := map[string]string{
 		snapshotAnnotation:                           ensureMySQLSnapshotFile(snapshot),
 		targetModeAnnotation:                         string(effectiveRestoreTargetMode(restore.Spec.Target.Mode)),
+		storagePathAnnotation:                        storagePath,
 		"dataprotection.archinfra.io/driver-runtime": "builtin-mysql",
 	}
 	if reason := strings.TrimSpace(restore.Spec.Reason); reason != "" {
@@ -581,7 +530,7 @@ func buildBuiltInMySQLRestoreJob(restore *dpv1alpha1.RestoreRequest, backupRun *
 	}, nil
 }
 
-func buildBuiltInMySQLBackupPodSpec(execution dpv1alpha1.ExecutionTemplateSpec, source *dpv1alpha1.BackupSource, repository *dpv1alpha1.BackupRepository, componentPath string, driverConfig dpv1alpha1.DriverConfig, snapshot string, retention int32, scheduled bool) (corev1.PodSpec, error) {
+func buildBuiltInMySQLBackupPodSpec(execution dpv1alpha1.ExecutionTemplateSpec, source *dpv1alpha1.BackupSource, storage *dpv1alpha1.BackupStorage, storagePath string, driverConfig dpv1alpha1.DriverConfig, snapshot string, retention int32) (corev1.PodSpec, error) {
 	connectionEnv, err := mysqlConnectionEnvVars(source.Spec.Endpoint, source.Spec.TargetRef, source.Namespace)
 	if err != nil {
 		return corev1.PodSpec{}, err
@@ -599,14 +548,15 @@ func buildBuiltInMySQLBackupPodSpec(execution dpv1alpha1.ExecutionTemplateSpec, 
 		{Name: "DP_OPERATION", Value: "backup"},
 		{Name: "DP_SOURCE_NAME", Value: source.Name},
 		{Name: "DP_SOURCE_DRIVER", Value: string(source.Spec.Driver)},
-		{Name: "DP_REPOSITORY_NAME", Value: repository.Name},
-		{Name: "DP_REPOSITORY_TYPE", Value: string(repository.Spec.Type)},
-		{Name: "BACKUP_COMPONENT_PATH", Value: componentPath},
+		{Name: "DP_STORAGE_NAME", Value: storage.Name},
+		{Name: "DP_STORAGE_TYPE", Value: string(storage.Spec.Type)},
+		{Name: "DP_STORAGE_PATH", Value: storagePath},
+		{Name: "BACKUP_COMPONENT_PATH", Value: storagePath},
 		{Name: "BACKUP_RETENTION", Value: fmt.Sprintf("%d", retention)},
 		{Name: "BACKUP_DATABASES", Value: strings.Join(mysqlConfig.Databases, ",")},
 		{Name: "BACKUP_TABLES", Value: strings.Join(mysqlConfig.Tables, ",")},
 	}
-	if !scheduled {
+	if strings.TrimSpace(snapshot) != "" {
 		envs = append(envs, corev1.EnvVar{Name: "MYSQL_BACKUP_SNAPSHOT", Value: ensureMySQLSnapshotBase(snapshot)})
 	}
 	envs = append(envs, connectionEnv...)
@@ -630,23 +580,23 @@ func buildBuiltInMySQLBackupPodSpec(execution dpv1alpha1.ExecutionTemplateSpec, 
 		Containers:         []corev1.Container{mysqlContainer},
 	}
 
-	switch repository.Spec.Type {
-	case dpv1alpha1.RepositoryTypeNFS:
+	switch storage.Spec.Type {
+	case dpv1alpha1.StorageTypeNFS:
 		podSpec.Volumes = []corev1.Volume{
 			{
 				Name: "backup-storage",
 				VolumeSource: corev1.VolumeSource{
 					NFS: &corev1.NFSVolumeSource{
-						Server: repository.Spec.NFS.Server,
-						Path:   repository.Spec.NFS.Path,
+						Server: storage.Spec.NFS.Server,
+						Path:   storage.Spec.NFS.Path,
 					},
 				},
 			},
 		}
 		podSpec.Containers[0].Env = append(podSpec.Containers[0].Env, corev1.EnvVar{Name: "BACKUP_BASE_DIR", Value: mysqlBackupMountPath})
 		podSpec.Containers[0].VolumeMounts = []corev1.VolumeMount{{Name: "backup-storage", MountPath: mysqlBackupMountPath}}
-	case dpv1alpha1.RepositoryTypeS3:
-		s3Env, s3Err := s3RepositoryEnvVars(repository)
+	case dpv1alpha1.StorageTypeS3:
+		s3Env, s3Err := s3StorageEnvVars(storage)
 		if s3Err != nil {
 			return corev1.PodSpec{}, s3Err
 		}
@@ -658,7 +608,7 @@ func buildBuiltInMySQLBackupPodSpec(execution dpv1alpha1.ExecutionTemplateSpec, 
 				Command:         []string{"/bin/sh", "-ceu"},
 				Args:            []string{mysqlS3PrefetchScript},
 				Env: append([]corev1.EnvVar{
-					{Name: "BACKUP_COMPONENT_PATH", Value: componentPath},
+					{Name: "BACKUP_COMPONENT_PATH", Value: storagePath},
 					{Name: "BACKUP_BASE_DIR", Value: mysqlExportMountPath},
 				}, s3Env...),
 				VolumeMounts: []corev1.VolumeMount{
@@ -681,7 +631,7 @@ func buildBuiltInMySQLBackupPodSpec(execution dpv1alpha1.ExecutionTemplateSpec, 
 			Command:         []string{"/bin/sh", "-ceu"},
 			Args:            []string{mysqlS3UploadScript},
 			Env: append([]corev1.EnvVar{
-				{Name: "BACKUP_COMPONENT_PATH", Value: componentPath},
+				{Name: "BACKUP_COMPONENT_PATH", Value: storagePath},
 				{Name: "BACKUP_BASE_DIR", Value: mysqlExportMountPath},
 				{Name: "STATUS_DIR", Value: mysqlStatusMountPath},
 			}, s3Env...),
@@ -695,13 +645,13 @@ func buildBuiltInMySQLBackupPodSpec(execution dpv1alpha1.ExecutionTemplateSpec, 
 			{Name: "status-dir", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 		}
 	default:
-		return corev1.PodSpec{}, newPermanentDependencyError("unsupported repository type %q for built-in mysql backup runtime", repository.Spec.Type)
+		return corev1.PodSpec{}, newPermanentDependencyError("unsupported storage type %q for built-in mysql backup runtime", storage.Spec.Type)
 	}
 
 	return podSpec, nil
 }
 
-func buildBuiltInMySQLRestorePodSpec(execution dpv1alpha1.ExecutionTemplateSpec, restore *dpv1alpha1.RestoreRequest, source *dpv1alpha1.BackupSource, repository *dpv1alpha1.BackupRepository, componentPath string, driverConfig dpv1alpha1.DriverConfig, snapshot string) (corev1.PodSpec, error) {
+func buildBuiltInMySQLRestorePodSpec(execution dpv1alpha1.ExecutionTemplateSpec, restore *dpv1alpha1.RestoreRequest, source *dpv1alpha1.BackupSource, storage *dpv1alpha1.BackupStorage, storagePath string, driverConfig dpv1alpha1.DriverConfig, snapshot string) (corev1.PodSpec, error) {
 	connectionEndpoint, connectionTargetRef := effectiveRestoreEndpoint(restore, source)
 	connectionEnv, err := mysqlConnectionEnvVars(connectionEndpoint, connectionTargetRef, restore.Namespace)
 	if err != nil {
@@ -717,11 +667,12 @@ func buildBuiltInMySQLRestorePodSpec(execution dpv1alpha1.ExecutionTemplateSpec,
 		{Name: "DP_OPERATION", Value: "restore"},
 		{Name: "DP_SOURCE_NAME", Value: source.Name},
 		{Name: "DP_SOURCE_DRIVER", Value: string(source.Spec.Driver)},
-		{Name: "DP_REPOSITORY_NAME", Value: repository.Name},
-		{Name: "DP_REPOSITORY_TYPE", Value: string(repository.Spec.Type)},
+		{Name: "DP_STORAGE_NAME", Value: storage.Name},
+		{Name: "DP_STORAGE_TYPE", Value: string(storage.Spec.Type)},
+		{Name: "DP_STORAGE_PATH", Value: storagePath},
 		{Name: "DP_RESTORE_REQUEST_NAME", Value: restore.Name},
 		{Name: "DP_RESTORE_TARGET_MODE", Value: string(effectiveRestoreTargetMode(restore.Spec.Target.Mode))},
-		{Name: "BACKUP_COMPONENT_PATH", Value: componentPath},
+		{Name: "BACKUP_COMPONENT_PATH", Value: storagePath},
 		{Name: "MYSQL_RESTORE_SNAPSHOT", Value: snapshot},
 		{Name: "MYSQL_RESTORE_MODE", Value: restoreMode},
 	}
@@ -746,23 +697,23 @@ func buildBuiltInMySQLRestorePodSpec(execution dpv1alpha1.ExecutionTemplateSpec,
 		Containers:         []corev1.Container{mysqlContainer},
 	}
 
-	switch repository.Spec.Type {
-	case dpv1alpha1.RepositoryTypeNFS:
+	switch storage.Spec.Type {
+	case dpv1alpha1.StorageTypeNFS:
 		podSpec.Volumes = []corev1.Volume{
 			{
 				Name: "backup-storage",
 				VolumeSource: corev1.VolumeSource{
 					NFS: &corev1.NFSVolumeSource{
-						Server: repository.Spec.NFS.Server,
-						Path:   repository.Spec.NFS.Path,
+						Server: storage.Spec.NFS.Server,
+						Path:   storage.Spec.NFS.Path,
 					},
 				},
 			},
 		}
 		podSpec.Containers[0].Env = append(podSpec.Containers[0].Env, corev1.EnvVar{Name: "BACKUP_BASE_DIR", Value: mysqlBackupMountPath})
 		podSpec.Containers[0].VolumeMounts = []corev1.VolumeMount{{Name: "backup-storage", MountPath: mysqlBackupMountPath}}
-	case dpv1alpha1.RepositoryTypeS3:
-		s3Env, s3Err := s3RepositoryEnvVars(repository)
+	case dpv1alpha1.StorageTypeS3:
+		s3Env, s3Err := s3StorageEnvVars(storage)
 		if s3Err != nil {
 			return corev1.PodSpec{}, s3Err
 		}
@@ -774,7 +725,7 @@ func buildBuiltInMySQLRestorePodSpec(execution dpv1alpha1.ExecutionTemplateSpec,
 				Command:         []string{"/bin/sh", "-ceu"},
 				Args:            []string{mysqlS3DownloadScript},
 				Env: append([]corev1.EnvVar{
-					{Name: "BACKUP_COMPONENT_PATH", Value: componentPath},
+					{Name: "BACKUP_COMPONENT_PATH", Value: storagePath},
 					{Name: "BACKUP_BASE_DIR", Value: mysqlRestoreMountPath},
 				}, s3Env...),
 				VolumeMounts: []corev1.VolumeMount{
@@ -790,7 +741,7 @@ func buildBuiltInMySQLRestorePodSpec(execution dpv1alpha1.ExecutionTemplateSpec,
 			{Name: "restore-staging", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 		}
 	default:
-		return corev1.PodSpec{}, newPermanentDependencyError("unsupported repository type %q for built-in mysql restore runtime", repository.Spec.Type)
+		return corev1.PodSpec{}, newPermanentDependencyError("unsupported storage type %q for built-in mysql restore runtime", storage.Spec.Type)
 	}
 
 	return podSpec, nil
@@ -819,10 +770,6 @@ func useBuiltInMySQLRuntime(driver dpv1alpha1.BackupDriver, execution dpv1alpha1
 		return false
 	}
 	return len(execution.Command) == 0 && len(execution.Args) == 0
-}
-
-func mysqlComponentPath(namespace, sourceName string) string {
-	return strings.Join([]string{defaultBackupRootDir, "mysql", namespace, sourceName}, "/")
 }
 
 func mysqlConnectionEnvVars(endpoint dpv1alpha1.EndpointSpec, targetRef *dpv1alpha1.NamespacedObjectReference, defaultNamespace string) ([]corev1.EnvVar, error) {
@@ -875,19 +822,19 @@ func resolveMySQLHost(endpoint dpv1alpha1.EndpointSpec, targetRef *dpv1alpha1.Na
 	return "", newPermanentDependencyError("built-in mysql runtime requires endpoint.host/serviceRef or targetRef service")
 }
 
-func s3RepositoryEnvVars(repository *dpv1alpha1.BackupRepository) ([]corev1.EnvVar, error) {
-	if repository.Spec.Type != dpv1alpha1.RepositoryTypeS3 || repository.Spec.S3 == nil {
-		return nil, newPermanentDependencyError("repository %q is not an s3 repository", repository.Name)
+func s3StorageEnvVars(storage *dpv1alpha1.BackupStorage) ([]corev1.EnvVar, error) {
+	if storage.Spec.Type != dpv1alpha1.StorageTypeS3 || storage.Spec.S3 == nil {
+		return nil, newPermanentDependencyError("storage %q is not an s3 storage", storage.Name)
 	}
 	envs := []corev1.EnvVar{
-		{Name: "S3_ENDPOINT", Value: repository.Spec.S3.Endpoint},
-		{Name: "S3_BUCKET", Value: repository.Spec.S3.Bucket},
-		{Name: "S3_PREFIX", Value: repository.Spec.S3.Prefix},
-		{Name: "S3_INSECURE", Value: boolString(repository.Spec.S3.Insecure)},
+		{Name: "S3_ENDPOINT", Value: storage.Spec.S3.Endpoint},
+		{Name: "S3_BUCKET", Value: storage.Spec.S3.Bucket},
+		{Name: "S3_PREFIX", Value: storage.Spec.S3.Prefix},
+		{Name: "S3_INSECURE", Value: boolString(storage.Spec.S3.Insecure)},
 	}
-	envs = appendSecretEnvVar(envs, "S3_ACCESS_KEY", repository.Spec.S3.AccessKeyFrom)
-	envs = appendSecretEnvVar(envs, "S3_SECRET_KEY", repository.Spec.S3.SecretKeyFrom)
-	envs = appendSecretEnvVar(envs, "S3_SESSION_TOKEN", repository.Spec.S3.SessionTokenRef)
+	envs = appendSecretEnvVar(envs, "S3_ACCESS_KEY", storage.Spec.S3.AccessKeyFrom)
+	envs = appendSecretEnvVar(envs, "S3_SECRET_KEY", storage.Spec.S3.SecretKeyFrom)
+	envs = appendSecretEnvVar(envs, "S3_SESSION_TOKEN", storage.Spec.S3.SessionTokenRef)
 	return envs, nil
 }
 

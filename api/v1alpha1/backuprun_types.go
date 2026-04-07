@@ -6,22 +6,27 @@ import (
 )
 
 type BackupRunSpec struct {
-	PolicyRef      *corev1.LocalObjectReference  `json:"policyRef,omitempty"`
-	SourceRef      corev1.LocalObjectReference   `json:"sourceRef"`
-	RepositoryRefs []corev1.LocalObjectReference `json:"repositoryRefs,omitempty"`
-	Reason         string                        `json:"reason,omitempty"`
-	Snapshot       string                        `json:"snapshot,omitempty"`
-	DriverConfig   DriverConfig                  `json:"driverConfig,omitempty"`
+	// PolicyRef is optional for manual runs, but when set the run inherits the
+	// policy defaults and writes into the same storage path layout.
+	PolicyRef *corev1.LocalObjectReference `json:"policyRef,omitempty"`
+	// SourceRef is always required so the run remains self-describing.
+	SourceRef corev1.LocalObjectReference `json:"sourceRef"`
+	// StorageRefs optionally narrows the policy storages to a subset. If empty
+	// and PolicyRef is set, the run uses all storages from the policy.
+	StorageRefs  []corev1.LocalObjectReference `json:"storageRefs,omitempty"`
+	Reason       string                        `json:"reason,omitempty"`
+	Snapshot     string                        `json:"snapshot,omitempty"`
+	DriverConfig DriverConfig                  `json:"driverConfig,omitempty"`
 }
 
 type BackupRunStatus struct {
-	Phase              ResourcePhase         `json:"phase,omitempty"`
-	ObservedGeneration int64                 `json:"observedGeneration,omitempty"`
-	StartedAt          *metav1.Time          `json:"startedAt,omitempty"`
-	CompletedAt        *metav1.Time          `json:"completedAt,omitempty"`
-	JobNames           []string              `json:"jobNames,omitempty"`
-	Repositories       []RepositoryRunStatus `json:"repositories,omitempty"`
-	Conditions         []metav1.Condition    `json:"conditions,omitempty"`
+	Phase              ResourcePhase      `json:"phase,omitempty"`
+	ObservedGeneration int64              `json:"observedGeneration,omitempty"`
+	StartedAt          *metav1.Time       `json:"startedAt,omitempty"`
+	CompletedAt        *metav1.Time       `json:"completedAt,omitempty"`
+	JobNames           []string           `json:"jobNames,omitempty"`
+	Storages           []StorageRunStatus `json:"storages,omitempty"`
+	Conditions         []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true

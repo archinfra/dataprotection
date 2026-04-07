@@ -34,7 +34,7 @@ func (r *BackupPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	original := policy.DeepCopy()
 	policy.Status.ObservedGeneration = policy.Generation
-	policy.Status.CronJobNames = dpv1alpha1.PredictCronJobNames(policy.Name, policy.Spec.RepositoryRefs)
+	policy.Status.CronJobNames = dpv1alpha1.PredictCronJobNames(policy.Name, policy.Spec.StorageRefs)
 
 	patchStatus := func(result ctrl.Result, reconcileErr error) (ctrl.Result, error) {
 		if err := r.Status().Patch(ctx, &policy, client.MergeFrom(original)); err != nil {
@@ -81,7 +81,7 @@ func (r *BackupPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return patchStatus(ctrl.Result{}, nil)
 	}
 
-	repositories, err := resolveRepositories(ctx, r.Client, policy.Namespace, policy.Spec.RepositoryRefs)
+	storages, err := resolveStorages(ctx, r.Client, policy.Namespace, policy.Spec.StorageRefs)
 	if err != nil {
 		if cleanupErr := r.cleanupOwnedCronJobs(ctx, &policy, nil); cleanupErr != nil {
 			return ctrl.Result{}, cleanupErr
@@ -92,30 +92,18 @@ func (r *BackupPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		reason := "DependencyNotReady"
 		if isPermanentDependencyError(err) {
 			policy.Status.Phase = dpv1alpha1.ResourcePhaseFailed
-			reason = "InvalidRepository"
+			reason = "InvalidStorage"
 		} else if !isDependencyMissing(err) {
 			reason = "DependencyLookupFailed"
 		}
-		markCondition(&policy.Status.Conditions, "Ready", metav1.ConditionFalse, reason, fmt.Sprintf("unable to resolve BackupRepository references: %v", err), policy.Generation)
+		markCondition(&policy.Status.Conditions, "Ready", metav1.ConditionFalse, reason, fmt.Sprintf("unable to resolve BackupStorage references: %v", err), policy.Generation)
 		if policy.Status.Phase == dpv1alpha1.ResourcePhaseFailed {
 			return patchStatus(ctrl.Result{}, nil)
 		}
 		return patchStatus(requeueSoon(), nil)
 	}
-	for _, repository := range repositories {
-		if err := repository.Spec.ValidateBasic(); err != nil {
-			if cleanupErr := r.cleanupOwnedCronJobs(ctx, &policy, nil); cleanupErr != nil {
-				return ctrl.Result{}, cleanupErr
-			}
-			policy.Status.Phase = dpv1alpha1.ResourcePhaseFailed
-			policy.Status.LastScheduleTime = nil
-			policy.Status.NextScheduleTime = nil
-			markCondition(&policy.Status.Conditions, "Ready", metav1.ConditionFalse, "InvalidRepository", fmt.Sprintf("referenced BackupRepository %q is invalid: %v", repository.Name, err), policy.Generation)
-			return patchStatus(ctrl.Result{}, nil)
-		}
-	}
 
-	keepLast, _, err := resolveKeepLastRetention(ctx, r.Client, policy.Namespace, policy.Spec.Retention, localRefName(policy.Spec.RetentionPolicyRef))
+	_, _, err = resolveKeepLastRetention(ctx, r.Client, policy.Namespace, policy.Spec.Retention, localRefName(policy.Spec.RetentionPolicyRef))
 	if err != nil {
 		if cleanupErr := r.cleanupOwnedCronJobs(ctx, &policy, nil); cleanupErr != nil {
 			return ctrl.Result{}, cleanupErr
@@ -137,10 +125,13 @@ func (r *BackupPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return patchStatus(requeueSoon(), nil)
 	}
 
-	desiredCronJobNames := make(map[string]struct{}, len(repositories))
+	desiredCronJobNames := make(map[string]struct{}, len(storages))
 	var latestLastScheduleTime *metav1.Time
-	for i := range repositories {
-		desired, err := buildBackupCronJob(&policy, source, &repositories[i], keepLast)
+	for i := range storages {
+		// Each storage gets its own native CronJob. The CronJob only creates a
+		// BackupRun CR, which keeps scheduling history and data execution history
+		// cleanly separated.
+		desired, err := buildBackupCronJob(&policy, source, &storages[i])
 		if err != nil {
 			policy.Status.Phase = dpv1alpha1.ResourcePhaseFailed
 			policy.Status.LastScheduleTime = nil
@@ -180,7 +171,7 @@ func (r *BackupPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	policy.Status.Phase = dpv1alpha1.ResourcePhaseReady
-	markCondition(&policy.Status.Conditions, "Ready", metav1.ConditionTrue, "Reconciled", fmt.Sprintf("managed %d CronJob resource(s) across %d repository target(s)", len(desiredCronJobNames), len(repositories)), policy.Generation)
+	markCondition(&policy.Status.Conditions, "Ready", metav1.ConditionTrue, "Reconciled", fmt.Sprintf("managed %d CronJob resource(s) across %d storage target(s)", len(desiredCronJobNames), len(storages)), policy.Generation)
 	return patchStatus(ctrl.Result{}, nil)
 }
 

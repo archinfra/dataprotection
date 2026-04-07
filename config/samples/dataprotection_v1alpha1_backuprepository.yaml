@@ -1,9 +1,0 @@
-apiVersion: dataprotection.archinfra.io/v1alpha1
-kind: BackupRepository
-metadata:
-  name: mysql-prod
-  namespace: backup-system
-spec:
-  storageRef:
-    name: minio-primary
-  path: mysql/prod

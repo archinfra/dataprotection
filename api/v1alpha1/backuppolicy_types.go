@@ -6,15 +6,19 @@ import (
 )
 
 type BackupPolicySpec struct {
-	SourceRef          corev1.LocalObjectReference   `json:"sourceRef"`
-	RepositoryRefs     []corev1.LocalObjectReference `json:"repositoryRefs,omitempty"`
-	Schedule           BackupScheduleSpec            `json:"schedule,omitempty"`
-	Retention          RetentionRule                 `json:"retention,omitempty"`
-	RetentionPolicyRef *corev1.LocalObjectReference  `json:"retentionPolicyRef,omitempty"`
-	Verification       VerificationSpec              `json:"verification,omitempty"`
-	Execution          ExecutionTemplateSpec         `json:"execution,omitempty"`
-	DriverConfig       DriverConfig                  `json:"driverConfig,omitempty"`
-	Suspend            bool                          `json:"suspend,omitempty"`
+	// SourceRef points to the protected source object.
+	SourceRef corev1.LocalObjectReference `json:"sourceRef"`
+	// StorageRefs lists the destination backends. The policy controller renders
+	// one schedule trigger per storage.
+	StorageRefs []corev1.LocalObjectReference `json:"storageRefs,omitempty"`
+	Schedule    BackupScheduleSpec            `json:"schedule,omitempty"`
+	Retention   RetentionRule                 `json:"retention,omitempty"`
+	// RetentionPolicyRef points to the reusable retention object.
+	RetentionPolicyRef *corev1.LocalObjectReference `json:"retentionPolicyRef,omitempty"`
+	Verification       VerificationSpec             `json:"verification,omitempty"`
+	Execution          ExecutionTemplateSpec        `json:"execution,omitempty"`
+	DriverConfig       DriverConfig                 `json:"driverConfig,omitempty"`
+	Suspend            bool                         `json:"suspend,omitempty"`
 }
 
 type BackupPolicyStatus struct {

@@ -26,6 +26,14 @@ func init() {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "trigger-backup-run" {
+		if err := runTriggerBackupRun(os.Args[2:]); err != nil {
+			ctrl.Log.WithName("trigger").Error(err, "unable to create scheduled BackupRun")
+			os.Exit(1)
+		}
+		return
+	}
+
 	var metricsAddr string
 	var probeAddr string
 	var enableLeaderElection bool
@@ -85,14 +93,6 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		ctrl.Log.WithName("setup").Error(err, "unable to create BackupSource controller")
-		os.Exit(1)
-	}
-
-	if err = (&controllers.BackupRepositoryReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		ctrl.Log.WithName("setup").Error(err, "unable to create BackupRepository controller")
 		os.Exit(1)
 	}
 

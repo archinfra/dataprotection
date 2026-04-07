@@ -149,8 +149,8 @@ spec:
                 type: object
               policyRef:
                 description: |-
-                  LocalObjectReference contains enough information to let you locate the
-                  referenced object inside the same namespace.
+                  PolicyRef is optional for manual runs, but when set the run inherits the
+                  policy defaults and writes into the same storage path layout.
                 properties:
                   name:
                     default: ""
@@ -165,7 +165,26 @@ spec:
                 x-kubernetes-map-type: atomic
               reason:
                 type: string
-              repositoryRefs:
+              snapshot:
+                type: string
+              sourceRef:
+                description: SourceRef is always required so the run remains self-describing.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+              storageRefs:
+                description: |-
+                  StorageRefs optionally narrows the policy storages to a subset. If empty
+                  and PolicyRef is set, the run uses all storages from the policy.
                 items:
                   description: |-
                     LocalObjectReference contains enough information to let you locate the
@@ -183,24 +202,6 @@ spec:
                   type: object
                   x-kubernetes-map-type: atomic
                 type: array
-              snapshot:
-                type: string
-              sourceRef:
-                description: |-
-                  LocalObjectReference contains enough information to let you locate the
-                  referenced object inside the same namespace.
-                properties:
-                  name:
-                    default: ""
-                    description: |-
-                      Name of the referent.
-                      This field is effectively required, but due to backwards compatibility is
-                      allowed to be empty. Instances of this type with an empty value here are
-                      almost certainly wrong.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                    type: string
-                type: object
-                x-kubernetes-map-type: atomic
             required:
             - sourceRef
             type: object
@@ -275,15 +276,19 @@ spec:
               phase:
                 description: ResourcePhase 定义资源当前的生命周期阶段
                 type: string
-              repositories:
+              startedAt:
+                format: date-time
+                type: string
+              storages:
                 items:
-                  description: RepositoryRunStatus 记录一次备份或恢复执行的运行时状态
+                  description: StorageRunStatus records one storage-specific execution
+                    branch within a run.
                   properties:
                     message:
                       description: Message 人类可读的状态详情或错误信息
                       type: string
                     name:
-                      description: Name 关联的 Job 名称或执行 ID
+                      description: Name 对应的 BackupStorage 名称
                       type: string
                     phase:
                       description: Phase 当前执行阶段（Pending/Running/Succeeded/Failed）
@@ -294,15 +299,15 @@ spec:
                     snapshotRef:
                       description: SnapshotRef 对应的 Snapshot CR 名称
                       type: string
+                    storagePath:
+                      description: StoragePath 记录这次执行最终写入的存储路径
+                      type: string
                     updatedAt:
                       description: UpdatedAt 状态最近更新时间
                       format: date-time
                       type: string
                   type: object
                 type: array
-              startedAt:
-                format: date-time
-                type: string
             type: object
         type: object
     served: true

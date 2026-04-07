@@ -6,11 +6,14 @@ import (
 )
 
 type SnapshotSpec struct {
-	SourceRef     corev1.LocalObjectReference `json:"sourceRef"`
-	BackupRunRef  corev1.LocalObjectReference `json:"backupRunRef"`
-	RepositoryRef corev1.LocalObjectReference `json:"repositoryRef"`
-	Driver        BackupDriver                `json:"driver"`
-	Snapshot      string                      `json:"snapshot"`
+	SourceRef    corev1.LocalObjectReference `json:"sourceRef"`
+	BackupRunRef corev1.LocalObjectReference `json:"backupRunRef"`
+	// StorageRef tells us which backend owns this snapshot artifact.
+	StorageRef corev1.LocalObjectReference `json:"storageRef"`
+	// StoragePath records the effective backend path used during backup.
+	StoragePath string       `json:"storagePath,omitempty"`
+	Driver      BackupDriver `json:"driver"`
+	Snapshot    string       `json:"snapshot"`
 }
 
 type SnapshotStatus struct {

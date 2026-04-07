@@ -6,15 +6,17 @@ metadata:
 spec:
   sourceRef:
     name: mysql-prod
-  repositoryRefs:
-    - name: minio-dc2
-    - name: nfs-dc1
+  # One policy can fan out to multiple reusable storages.
+  storageRefs:
+    - name: minio-primary
+    - name: nfs-secondary
   schedule:
     cron: "0 2 * * *"
     concurrencyPolicy: Forbid
-  # 推荐逐步迁移到 retentionPolicyRef，保留 retention.keepLast 作为兼容入口
+  # Prefer a reusable RetentionPolicy for long-term governance.
   retentionPolicyRef:
     name: mysql-daily-retention
+  # Inline retention is still convenient for quick smoke tests.
   retention:
     keepLast: 7
   verification:

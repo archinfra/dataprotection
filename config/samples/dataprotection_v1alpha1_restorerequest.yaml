@@ -6,9 +6,9 @@ metadata:
 spec:
   sourceRef:
     name: mysql-prod
-  # 推荐优先使用 snapshotRef；保留 snapshot + repositoryRef 作为兼容入口
+  # Prefer snapshotRef because it already knows the storage and storage path.
   snapshotRef:
-    name: mysql-prod-manual-minio-dc2-snapshot
+    name: mysql-prod-manual-minio-primary-snapshot
   target:
     mode: InPlace
     driverConfig:

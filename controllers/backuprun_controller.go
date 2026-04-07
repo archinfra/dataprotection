@@ -52,7 +52,7 @@ func (r *BackupRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		run.Status.Phase = dpv1alpha1.ResourcePhaseFailed
 		run.Status.CompletedAt = nowTime()
 		run.Status.JobNames = nil
-		run.Status.Repositories = nil
+		run.Status.Storages = nil
 		markCondition(&run.Status.Conditions, "Accepted", metav1.ConditionFalse, "InvalidSpec", err.Error(), run.Generation)
 		markCondition(&run.Status.Conditions, "Completed", metav1.ConditionFalse, "InvalidSpec", err.Error(), run.Generation)
 		return patchStatus(ctrl.Result{}, nil)
@@ -61,7 +61,7 @@ func (r *BackupRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	resolved, err := resolveBackupRunRefs(ctx, r.Client, &run)
 	if err != nil {
 		run.Status.JobNames = nil
-		run.Status.Repositories = nil
+		run.Status.Storages = nil
 		switch {
 		case isDependencyMissing(err):
 			run.Status.Phase = dpv1alpha1.ResourcePhasePending
@@ -84,25 +84,12 @@ func (r *BackupRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		run.Status.Phase = dpv1alpha1.ResourcePhaseFailed
 		run.Status.CompletedAt = nowTime()
 		run.Status.JobNames = nil
-		run.Status.Repositories = nil
+		run.Status.Storages = nil
 		message := fmt.Sprintf("referenced BackupSource %q is invalid: %v", resolved.Source.Name, err)
 		markCondition(&run.Status.Conditions, "Accepted", metav1.ConditionFalse, "InvalidSource", message, run.Generation)
 		markCondition(&run.Status.Conditions, "Completed", metav1.ConditionFalse, "InvalidSource", message, run.Generation)
 		return patchStatus(ctrl.Result{}, nil)
 	}
-	for _, repository := range resolved.Repositories {
-		if err := repository.Spec.ValidateBasic(); err != nil {
-			run.Status.Phase = dpv1alpha1.ResourcePhaseFailed
-			run.Status.CompletedAt = nowTime()
-			run.Status.JobNames = nil
-			run.Status.Repositories = nil
-			message := fmt.Sprintf("referenced BackupRepository %q is invalid: %v", repository.Name, err)
-			markCondition(&run.Status.Conditions, "Accepted", metav1.ConditionFalse, "InvalidRepository", message, run.Generation)
-			markCondition(&run.Status.Conditions, "Completed", metav1.ConditionFalse, "InvalidRepository", message, run.Generation)
-			return patchStatus(ctrl.Result{}, nil)
-		}
-	}
-
 	snapshot := strings.TrimSpace(run.Spec.Snapshot)
 	if snapshot == "" {
 		snapshot = run.Name
@@ -113,7 +100,7 @@ func (r *BackupRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		resolvedKeepLast, _, err := resolveKeepLastRetention(ctx, r.Client, run.Namespace, resolved.Policy.Spec.Retention, localRefName(resolved.Policy.Spec.RetentionPolicyRef))
 		if err != nil {
 			run.Status.JobNames = nil
-			run.Status.Repositories = nil
+			run.Status.Storages = nil
 			switch {
 			case isDependencyMissing(err):
 				run.Status.Phase = dpv1alpha1.ResourcePhasePending
@@ -134,20 +121,23 @@ func (r *BackupRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		keepLast = resolvedKeepLast
 	}
 
-	jobNames := make([]string, 0, len(resolved.Repositories))
-	repositoryStatuses := make([]dpv1alpha1.RepositoryRunStatus, 0, len(resolved.Repositories))
+	jobNames := make([]string, 0, len(resolved.Storages))
+	storageStatuses := make([]dpv1alpha1.StorageRunStatus, 0, len(resolved.Storages))
 	var latestCompletedAt *metav1.Time
 	overallPhase := dpv1alpha1.ResourcePhaseSucceeded
 
-	for i := range resolved.Repositories {
-		repository := &resolved.Repositories[i]
-		snapshotName := dpv1alpha1.BuildSnapshotName(run.Name, repository.Name, "snapshot")
-		desired, err := buildBackupRunJob(&run, resolved.Policy, resolved.Source, repository, snapshot, keepLast)
+	for i := range resolved.Storages {
+		// A single BackupRun can fan out to multiple storages. We keep a
+		// per-storage branch in status so operators can see partial success or
+		// partial failure without reading every child Job by hand.
+		storage := &resolved.Storages[i]
+		snapshotName := dpv1alpha1.BuildSnapshotName(run.Name, storage.Name, "snapshot")
+		desired, err := buildBackupRunJob(&run, resolved.Policy, resolved.Source, storage, resolved.StoragePath, snapshot, keepLast)
 		if err != nil {
 			run.Status.Phase = dpv1alpha1.ResourcePhaseFailed
 			run.Status.CompletedAt = nowTime()
 			run.Status.JobNames = uniqueStrings(jobNames)
-			run.Status.Repositories = repositoryStatuses
+			run.Status.Storages = storageStatuses
 			markCondition(&run.Status.Conditions, "Accepted", metav1.ConditionFalse, "RenderFailed", err.Error(), run.Generation)
 			markCondition(&run.Status.Conditions, "Completed", metav1.ConditionFalse, "RenderFailed", err.Error(), run.Generation)
 			return patchStatus(ctrl.Result{}, nil)
@@ -170,34 +160,35 @@ func (r *BackupRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			run.Status.Phase = dpv1alpha1.ResourcePhaseFailed
 			run.Status.CompletedAt = nowTime()
 			run.Status.JobNames = uniqueStrings(jobNames)
-			run.Status.Repositories = nil
+			run.Status.Storages = nil
 			message := fmt.Sprintf("existing Job %q is not controlled by BackupRun %q", current.Name, run.Name)
 			markCondition(&run.Status.Conditions, "Accepted", metav1.ConditionFalse, "JobNameConflict", message, run.Generation)
 			markCondition(&run.Status.Conditions, "Completed", metav1.ConditionFalse, "JobNameConflict", message, run.Generation)
 			return patchStatus(ctrl.Result{}, nil)
 		}
 
-		repositoryPhase, message, completedAt := jobPhase(current)
+		storagePhase, message, completedAt := jobPhase(current)
 		if completedAt != nil && (latestCompletedAt == nil || completedAt.After(latestCompletedAt.Time)) {
 			latestCompletedAt = completedAt.DeepCopy()
 		}
-		repositoryStatuses = append(repositoryStatuses, dpv1alpha1.RepositoryRunStatus{
-			Name:        repository.Name,
-			Phase:       repositoryPhase,
+		storageStatuses = append(storageStatuses, dpv1alpha1.StorageRunStatus{
+			Name:        storage.Name,
+			Phase:       storagePhase,
 			Message:     message,
+			StoragePath: resolved.StoragePath,
 			Snapshot:    snapshot,
 			SnapshotRef: snapshotName,
 			UpdatedAt:   nowTime(),
 		})
-		overallPhase = combinePhases(overallPhase, repositoryPhase)
+		overallPhase = combinePhases(overallPhase, storagePhase)
 
-		if err := r.reconcileSnapshot(ctx, &run, resolved.Source, repository, snapshot, snapshotName, repositoryPhase, completedAt, message); err != nil {
+		if err := r.reconcileSnapshot(ctx, &run, resolved.Source, storage, resolved.StoragePath, snapshot, snapshotName, storagePhase, completedAt, message); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
 
 	run.Status.JobNames = uniqueStrings(jobNames)
-	run.Status.Repositories = repositoryStatuses
+	run.Status.Storages = storageStatuses
 	run.Status.Phase = overallPhase
 	if overallPhase == dpv1alpha1.ResourcePhaseSucceeded || overallPhase == dpv1alpha1.ResourcePhaseFailed {
 		if latestCompletedAt == nil {
@@ -211,10 +202,10 @@ func (r *BackupRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	markCondition(&run.Status.Conditions, "Accepted", metav1.ConditionTrue, "Reconciled", fmt.Sprintf("managed %d Job resource(s)", len(jobNames)), run.Generation)
 	switch overallPhase {
 	case dpv1alpha1.ResourcePhaseSucceeded:
-		markCondition(&run.Status.Conditions, "Completed", metav1.ConditionTrue, "AllJobsSucceeded", "all repository backup jobs completed successfully", run.Generation)
+		markCondition(&run.Status.Conditions, "Completed", metav1.ConditionTrue, "AllJobsSucceeded", "all storage backup jobs completed successfully", run.Generation)
 		return patchStatus(ctrl.Result{}, nil)
 	case dpv1alpha1.ResourcePhaseFailed:
-		markCondition(&run.Status.Conditions, "Completed", metav1.ConditionFalse, "JobFailed", "one or more repository backup jobs failed", run.Generation)
+		markCondition(&run.Status.Conditions, "Completed", metav1.ConditionFalse, "JobFailed", "one or more storage backup jobs failed", run.Generation)
 		return patchStatus(ctrl.Result{}, nil)
 	case dpv1alpha1.ResourcePhaseRunning:
 		markCondition(&run.Status.Conditions, "Completed", metav1.ConditionFalse, "Running", "backup jobs are still running", run.Generation)
@@ -228,13 +219,17 @@ func (r *BackupRunReconciler) reconcileSnapshot(
 	ctx context.Context,
 	run *dpv1alpha1.BackupRun,
 	source *dpv1alpha1.BackupSource,
-	repository *dpv1alpha1.BackupRepository,
+	storage *dpv1alpha1.BackupStorage,
+	storagePath string,
 	snapshotValue string,
 	snapshotName string,
 	phase dpv1alpha1.ResourcePhase,
 	completedAt *metav1.Time,
 	message string,
 ) error {
+	// Snapshot is our stable, restorable record of one backup artifact. It is
+	// intentionally separate from the Job so users can restore by snapshot even
+	// after Jobs age out.
 	current := &dpv1alpha1.Snapshot{}
 	key := client.ObjectKey{Namespace: run.Namespace, Name: snapshotName}
 	err := r.Get(ctx, key, current)
@@ -251,13 +246,14 @@ func (r *BackupRunReconciler) reconcileSnapshot(
 	}
 
 	original := current.DeepCopy()
-	current.Labels = mergeStringMaps(current.Labels, managedResourceLabels("BackupRun", run.Name, "snapshot", source.Name, repository.Name))
+	current.Labels = mergeStringMaps(current.Labels, managedResourceLabels("BackupRun", run.Name, "snapshot", source.Name, storage.Name))
 	current.Spec = dpv1alpha1.SnapshotSpec{
-		SourceRef:     corev1.LocalObjectReference{Name: source.Name},
-		BackupRunRef:  corev1.LocalObjectReference{Name: run.Name},
-		RepositoryRef: corev1.LocalObjectReference{Name: repository.Name},
-		Driver:        source.Spec.Driver,
-		Snapshot:      snapshotValue,
+		SourceRef:    corev1.LocalObjectReference{Name: source.Name},
+		BackupRunRef: corev1.LocalObjectReference{Name: run.Name},
+		StorageRef:   corev1.LocalObjectReference{Name: storage.Name},
+		StoragePath:  storagePath,
+		Driver:       source.Spec.Driver,
+		Snapshot:     snapshotValue,
 	}
 	if err := controllerutil.SetControllerReference(run, current, r.Scheme); err != nil {
 		return err

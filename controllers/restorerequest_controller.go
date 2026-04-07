@@ -80,7 +80,9 @@ func (r *RestoreRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return patchStatus(ctrl.Result{}, nil)
 	}
 
-	backupRun, snapshotRef, repository, err := resolveRestoreRepository(ctx, r.Client, &restore)
+	// Restore prefers Snapshot as the primary input because Snapshot already
+	// captures both the storage identity and the effective storage path.
+	backupRun, snapshotRef, storage, storagePath, err := resolveRestoreStorage(ctx, r.Client, &restore, source)
 	if err != nil {
 		restore.Status.JobName = ""
 		switch {
@@ -100,16 +102,6 @@ func (r *RestoreRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			return ctrl.Result{}, err
 		}
 	}
-	if err := repository.Spec.ValidateBasic(); err != nil {
-		restore.Status.Phase = dpv1alpha1.ResourcePhaseFailed
-		restore.Status.CompletedAt = nowTime()
-		restore.Status.JobName = ""
-		message := fmt.Sprintf("referenced BackupRepository %q is invalid: %v", repository.Name, err)
-		markCondition(&restore.Status.Conditions, "Accepted", metav1.ConditionFalse, "InvalidRepository", message, restore.Generation)
-		markCondition(&restore.Status.Conditions, "Completed", metav1.ConditionFalse, "InvalidRepository", message, restore.Generation)
-		return patchStatus(ctrl.Result{}, nil)
-	}
-
 	if snapshotRef != nil {
 		if snapshotRef.Spec.SourceRef.Name != restore.Spec.SourceRef.Name {
 			restore.Status.Phase = dpv1alpha1.ResourcePhaseFailed
@@ -137,9 +129,9 @@ func (r *RestoreRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		snapshot = strings.TrimSpace(snapshotRef.Spec.Snapshot)
 	}
 	if snapshot == "" && backupRun != nil {
-		for _, repositoryStatus := range backupRun.Status.Repositories {
-			if repositoryStatus.Name == repository.Name && strings.TrimSpace(repositoryStatus.Snapshot) != "" {
-				snapshot = repositoryStatus.Snapshot
+		for _, storageStatus := range backupRun.Status.Storages {
+			if storageStatus.Name == storage.Name && strings.TrimSpace(storageStatus.Snapshot) != "" {
+				snapshot = storageStatus.Snapshot
 				break
 			}
 		}
@@ -171,7 +163,7 @@ func (r *RestoreRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		execution = policy.Spec.Execution
 	}
 
-	desired, err := buildRestoreJob(&restore, backupRun, source, repository, execution, snapshot)
+	desired, err := buildRestoreJob(&restore, backupRun, source, storage, storagePath, execution, snapshot)
 	if err != nil {
 		restore.Status.Phase = dpv1alpha1.ResourcePhaseFailed
 		restore.Status.CompletedAt = nowTime()

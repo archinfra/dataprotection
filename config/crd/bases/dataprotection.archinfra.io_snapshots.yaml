@@ -56,22 +56,6 @@ spec:
               driver:
                 description: BackupDriver 定义支持的数据库/中间件类型，即数据驱动类型
                 type: string
-              repositoryRef:
-                description: |-
-                  LocalObjectReference contains enough information to let you locate the
-                  referenced object inside the same namespace.
-                properties:
-                  name:
-                    default: ""
-                    description: |-
-                      Name of the referent.
-                      This field is effectively required, but due to backwards compatibility is
-                      allowed to be empty. Instances of this type with an empty value here are
-                      almost certainly wrong.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                    type: string
-                type: object
-                x-kubernetes-map-type: atomic
               snapshot:
                 type: string
               sourceRef:
@@ -90,12 +74,31 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
+              storagePath:
+                description: StoragePath records the effective backend path used during
+                  backup.
+                type: string
+              storageRef:
+                description: StorageRef tells us which backend owns this snapshot
+                  artifact.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
             required:
             - backupRunRef
             - driver
-            - repositoryRef
             - snapshot
             - sourceRef
+            - storageRef
             type: object
           status:
             properties:

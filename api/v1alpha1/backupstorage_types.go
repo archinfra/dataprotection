@@ -3,10 +3,14 @@ package v1alpha1
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 type BackupStorageSpec struct {
-	Type    RepositoryType     `json:"type"`
-	Default bool               `json:"default,omitempty"`
-	NFS     *NFSRepositorySpec `json:"nfs,omitempty"`
-	S3      *S3RepositorySpec  `json:"s3,omitempty"`
+	// Type selects which backend driver this reusable storage uses.
+	Type StorageType `json:"type"`
+	// Default marks the namespace-level default storage for future expansion.
+	Default bool `json:"default,omitempty"`
+	// NFS config is required when type=nfs.
+	NFS *NFSStorageSpec `json:"nfs,omitempty"`
+	// S3 config is required when type=s3.
+	S3 *S3StorageSpec `json:"s3,omitempty"`
 }
 
 type BackupStorageStatus struct {

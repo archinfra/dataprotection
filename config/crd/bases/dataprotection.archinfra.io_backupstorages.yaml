@@ -38,9 +38,11 @@ spec:
           spec:
             properties:
               default:
+                description: Default marks the namespace-level default storage for
+                  future expansion.
                 type: boolean
               nfs:
-                description: NFSRepositorySpec NFS 类型的存储库配置
+                description: NFS config is required when type=nfs.
                 properties:
                   path:
                     description: Path NFS 导出的共享路径
@@ -53,7 +55,7 @@ spec:
                 - server
                 type: object
               s3:
-                description: S3RepositorySpec S3 兼容对象存储的配置
+                description: S3 config is required when type=s3.
                 properties:
                   accessKeyFrom:
                     description: AccessKeyFrom 从 Secret 中获取 AccessKey
@@ -114,7 +116,8 @@ spec:
                 - endpoint
                 type: object
               type:
-                description: RepositoryType 定义备份存储库的类型
+                description: Type selects which backend driver this reusable storage
+                  uses.
                 type: string
             required:
             - type

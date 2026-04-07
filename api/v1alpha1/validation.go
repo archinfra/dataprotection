@@ -35,14 +35,14 @@ func (s *BackupStorageSpec) ValidateBasic() error {
 	}
 
 	switch s.Type {
-	case RepositoryTypeNFS:
+	case StorageTypeNFS:
 		if s.NFS == nil {
 			return fmt.Errorf("spec.nfs is required when spec.type=nfs")
 		}
 		if strings.TrimSpace(s.NFS.Server) == "" || strings.TrimSpace(s.NFS.Path) == "" {
 			return fmt.Errorf("spec.nfs.server and spec.nfs.path are required")
 		}
-	case RepositoryTypeS3:
+	case StorageTypeS3:
 		if s.S3 == nil {
 			return fmt.Errorf("spec.s3 is required when spec.type=s3")
 		}
@@ -50,30 +50,10 @@ func (s *BackupStorageSpec) ValidateBasic() error {
 			return fmt.Errorf("spec.s3.endpoint and spec.s3.bucket are required")
 		}
 	default:
-		return fmt.Errorf("unsupported repository type %q", s.Type)
+		return fmt.Errorf("unsupported storage type %q", s.Type)
 	}
 
 	return nil
-}
-
-func (s *BackupRepositorySpec) ValidateBasic() error {
-	if s.StorageRef != nil && strings.TrimSpace(s.StorageRef.Name) == "" {
-		return fmt.Errorf("spec.storageRef.name cannot be empty")
-	}
-	if s.StorageRef != nil && hasInlineRepositoryBackend(s) {
-		return fmt.Errorf("spec.storageRef cannot be combined with inline repository backend fields")
-	}
-	if s.StorageRef != nil {
-		return nil
-	}
-	if !hasInlineRepositoryBackend(s) {
-		return nil
-	}
-	return (&BackupStorageSpec{
-		Type: s.Type,
-		NFS:  s.NFS,
-		S3:   s.S3,
-	}).ValidateBasic()
 }
 
 func (s *BackupPolicySpec) ValidateBasic() error {
@@ -81,11 +61,11 @@ func (s *BackupPolicySpec) ValidateBasic() error {
 		return fmt.Errorf("spec.sourceRef.name is required")
 	}
 
-	if len(s.RepositoryRefs) == 0 {
-		return fmt.Errorf("spec.repositoryRefs requires at least one repository")
+	if len(s.StorageRefs) == 0 {
+		return fmt.Errorf("spec.storageRefs requires at least one storage")
 	}
-	if hasDuplicateLocalObjectReferenceNames(s.RepositoryRefs) {
-		return fmt.Errorf("spec.repositoryRefs contains duplicate repository names")
+	if hasDuplicateLocalObjectReferenceNames(s.StorageRefs) {
+		return fmt.Errorf("spec.storageRefs contains duplicate storage names")
 	}
 	if s.RetentionPolicyRef != nil && strings.TrimSpace(s.RetentionPolicyRef.Name) == "" {
 		return fmt.Errorf("spec.retentionPolicyRef.name cannot be empty")
@@ -99,10 +79,6 @@ func (s *BackupPolicySpec) ValidateBasic() error {
 	}
 
 	return nil
-}
-
-func hasInlineRepositoryBackend(s *BackupRepositorySpec) bool {
-	return strings.TrimSpace(string(s.Type)) != "" || s.NFS != nil || s.S3 != nil
 }
 
 func (s *RetentionPolicySpec) ValidateBasic() error {
@@ -119,11 +95,11 @@ func (s *BackupRunSpec) ValidateBasic() error {
 	if strings.TrimSpace(s.SourceRef.Name) == "" {
 		return fmt.Errorf("spec.sourceRef.name is required")
 	}
-	if len(s.RepositoryRefs) == 0 && s.PolicyRef == nil {
-		return fmt.Errorf("spec.repositoryRefs or spec.policyRef is required")
+	if len(s.StorageRefs) == 0 && s.PolicyRef == nil {
+		return fmt.Errorf("spec.storageRefs or spec.policyRef is required")
 	}
-	if hasDuplicateLocalObjectReferenceNames(s.RepositoryRefs) {
-		return fmt.Errorf("spec.repositoryRefs contains duplicate repository names")
+	if hasDuplicateLocalObjectReferenceNames(s.StorageRefs) {
+		return fmt.Errorf("spec.storageRefs contains duplicate storage names")
 	}
 	if err := validateMySQLDriverConfig(s.DriverConfig.MySQL); err != nil {
 		return err
@@ -138,8 +114,8 @@ func (s *RestoreRequestSpec) ValidateBasic() error {
 	if s.BackupRunRef == nil && s.SnapshotRef == nil && strings.TrimSpace(s.Snapshot) == "" {
 		return fmt.Errorf("spec.backupRunRef, spec.snapshotRef or spec.snapshot is required")
 	}
-	if s.RepositoryRef != nil && strings.TrimSpace(s.RepositoryRef.Name) == "" {
-		return fmt.Errorf("spec.repositoryRef.name cannot be empty")
+	if s.StorageRef != nil && strings.TrimSpace(s.StorageRef.Name) == "" {
+		return fmt.Errorf("spec.storageRef.name cannot be empty")
 	}
 	if s.SnapshotRef != nil && strings.TrimSpace(s.SnapshotRef.Name) == "" {
 		return fmt.Errorf("spec.snapshotRef.name cannot be empty")
@@ -164,14 +140,14 @@ func (s *BackupPolicySpec) EffectiveConcurrencyPolicy() batchv1.ConcurrencyPolic
 	return s.Schedule.ConcurrencyPolicy
 }
 
-func PredictCronJobNames(policyName string, repositoryRefs []corev1.LocalObjectReference) []string {
-	names := make([]string, 0, len(repositoryRefs))
-	for _, ref := range repositoryRefs {
-		repoName := strings.TrimSpace(ref.Name)
-		if repoName == "" {
+func PredictCronJobNames(policyName string, storageRefs []corev1.LocalObjectReference) []string {
+	names := make([]string, 0, len(storageRefs))
+	for _, ref := range storageRefs {
+		storageName := strings.TrimSpace(ref.Name)
+		if storageName == "" {
 			continue
 		}
-		names = append(names, BuildCronJobName(policyName, repoName))
+		names = append(names, BuildCronJobName(policyName, storageName))
 	}
 	sort.Strings(names)
 	return names
