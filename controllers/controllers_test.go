@@ -203,6 +203,16 @@ func TestBackupRunReconcileCreatesJobsAndTracksCompletion(t *testing.T) {
 	if updatedRun.Status.CompletedAt == nil {
 		t.Fatalf("expected completedAt to be set")
 	}
+	for _, repository := range []string{repositoryA.Name, repositoryB.Name} {
+		snapshotName := dpv1alpha1.BuildSnapshotName(run.Name, repository, "snapshot")
+		var snapshot dpv1alpha1.Snapshot
+		if err := fakeClient.Get(ctx, types.NamespacedName{Namespace: run.Namespace, Name: snapshotName}, &snapshot); err != nil {
+			t.Fatalf("expected snapshot %s: %v", snapshotName, err)
+		}
+		if snapshot.Spec.BackupRunRef.Name != run.Name {
+			t.Fatalf("expected snapshot %s to reference run %s, got %s", snapshotName, run.Name, snapshot.Spec.BackupRunRef.Name)
+		}
+	}
 }
 
 func TestRestoreRequestReconcileCreatesSingleJobFromBackupRun(t *testing.T) {
@@ -292,6 +302,75 @@ func TestRestoreRequestReconcileCreatesSingleJobFromBackupRun(t *testing.T) {
 	}
 }
 
+func TestRestoreRequestReconcileCreatesSingleJobFromSnapshotRef(t *testing.T) {
+	scheme := newTestScheme(t)
+	ctx := context.Background()
+
+	source := &dpv1alpha1.BackupSource{
+		ObjectMeta: metav1.ObjectMeta{Name: "mysql-prod", Namespace: "backup-system", UID: types.UID("source-uid")},
+		Spec: dpv1alpha1.BackupSourceSpec{
+			Driver: dpv1alpha1.BackupDriverMySQL,
+			Endpoint: dpv1alpha1.EndpointSpec{
+				Host: "mysql.default.svc",
+				Port: 3306,
+			},
+		},
+	}
+	repository := &dpv1alpha1.BackupRepository{
+		ObjectMeta: metav1.ObjectMeta{Name: "nfs-a", Namespace: "backup-system", UID: types.UID("repo-a")},
+		Spec: dpv1alpha1.BackupRepositorySpec{
+			Type: dpv1alpha1.RepositoryTypeNFS,
+			NFS:  &dpv1alpha1.NFSRepositorySpec{Server: "10.0.0.10", Path: "/data/a"},
+		},
+	}
+	backupRun := &dpv1alpha1.BackupRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "manual-001", Namespace: "backup-system", UID: types.UID("run-uid")},
+		Spec: dpv1alpha1.BackupRunSpec{
+			SourceRef:      corev1.LocalObjectReference{Name: source.Name},
+			RepositoryRefs: []corev1.LocalObjectReference{{Name: repository.Name}},
+			Snapshot:       "snapshot-001",
+		},
+	}
+	snapshot := &dpv1alpha1.Snapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: dpv1alpha1.BuildSnapshotName(backupRun.Name, repository.Name, "snapshot"), Namespace: "backup-system", UID: types.UID("snapshot-uid")},
+		Spec: dpv1alpha1.SnapshotSpec{
+			SourceRef:     corev1.LocalObjectReference{Name: source.Name},
+			BackupRunRef:  corev1.LocalObjectReference{Name: backupRun.Name},
+			RepositoryRef: corev1.LocalObjectReference{Name: repository.Name},
+			Driver:        dpv1alpha1.BackupDriverMySQL,
+			Snapshot:      "snapshot-001",
+		},
+		Status: dpv1alpha1.SnapshotStatus{
+			Phase: dpv1alpha1.ResourcePhaseSucceeded,
+		},
+	}
+	restore := &dpv1alpha1.RestoreRequest{
+		ObjectMeta: metav1.ObjectMeta{Name: "restore-by-snapshot", Namespace: "backup-system", UID: types.UID("restore-uid")},
+		Spec: dpv1alpha1.RestoreRequestSpec{
+			SourceRef:   corev1.LocalObjectReference{Name: source.Name},
+			SnapshotRef: &corev1.LocalObjectReference{Name: snapshot.Name},
+			Target:      dpv1alpha1.RestoreTargetSpec{Mode: dpv1alpha1.RestoreTargetModeInPlace},
+		},
+	}
+
+	fakeClient := newFakeClient(t, scheme, source, repository, backupRun, snapshot, restore)
+	reconciler := &RestoreRequestReconciler{Client: fakeClient, Scheme: scheme}
+
+	req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(restore)}
+	if _, err := reconciler.Reconcile(ctx, req); err != nil {
+		t.Fatalf("first reconcile failed: %v", err)
+	}
+
+	jobName := dpv1alpha1.BuildJobName(restore.Name, "restore")
+	var job batchv1.Job
+	if err := fakeClient.Get(ctx, types.NamespacedName{Namespace: restore.Namespace, Name: jobName}, &job); err != nil {
+		t.Fatalf("expected restore job %s: %v", jobName, err)
+	}
+	if got := job.Annotations[snapshotAnnotation]; got != "snapshot-001.sql.gz" {
+		t.Fatalf("expected snapshot annotation snapshot-001.sql.gz, got %q", got)
+	}
+}
+
 func TestBuildBuiltInMySQLBackupRunJobUsesRepositorySpecificRuntime(t *testing.T) {
 	source := &dpv1alpha1.BackupSource{
 		ObjectMeta: metav1.ObjectMeta{Name: "mysql-prod", Namespace: "backup-system"},
@@ -368,6 +447,7 @@ func newFakeClient(t *testing.T, scheme *runtime.Scheme, objects ...client.Objec
 			&dpv1alpha1.BackupPolicy{},
 			&dpv1alpha1.BackupRun{},
 			&dpv1alpha1.RestoreRequest{},
+			&dpv1alpha1.Snapshot{},
 			&batchv1.Job{},
 			&batchv1.CronJob{},
 		).

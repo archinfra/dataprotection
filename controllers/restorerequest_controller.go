@@ -80,7 +80,7 @@ func (r *RestoreRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return patchStatus(ctrl.Result{}, nil)
 	}
 
-	backupRun, repository, err := resolveRestoreRepository(ctx, r.Client, &restore)
+	backupRun, snapshotRef, repository, err := resolveRestoreRepository(ctx, r.Client, &restore)
 	if err != nil {
 		restore.Status.JobName = ""
 		switch {
@@ -110,6 +110,18 @@ func (r *RestoreRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return patchStatus(ctrl.Result{}, nil)
 	}
 
+	if snapshotRef != nil {
+		if snapshotRef.Spec.SourceRef.Name != restore.Spec.SourceRef.Name {
+			restore.Status.Phase = dpv1alpha1.ResourcePhaseFailed
+			restore.Status.CompletedAt = nowTime()
+			restore.Status.JobName = ""
+			message := fmt.Sprintf("spec.sourceRef.name %q does not match snapshot %q sourceRef %q", restore.Spec.SourceRef.Name, snapshotRef.Name, snapshotRef.Spec.SourceRef.Name)
+			markCondition(&restore.Status.Conditions, "Accepted", metav1.ConditionFalse, "InvalidReference", message, restore.Generation)
+			markCondition(&restore.Status.Conditions, "Completed", metav1.ConditionFalse, "InvalidReference", message, restore.Generation)
+			return patchStatus(ctrl.Result{}, nil)
+		}
+	}
+
 	if backupRun != nil && backupRun.Spec.SourceRef.Name != restore.Spec.SourceRef.Name {
 		restore.Status.Phase = dpv1alpha1.ResourcePhaseFailed
 		restore.Status.CompletedAt = nowTime()
@@ -121,6 +133,9 @@ func (r *RestoreRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	snapshot := strings.TrimSpace(restore.Spec.Snapshot)
+	if snapshot == "" && snapshotRef != nil {
+		snapshot = strings.TrimSpace(snapshotRef.Spec.Snapshot)
+	}
 	if snapshot == "" && backupRun != nil {
 		for _, repositoryStatus := range backupRun.Status.Repositories {
 			if repositoryStatus.Name == repository.Name && strings.TrimSpace(repositoryStatus.Snapshot) != "" {

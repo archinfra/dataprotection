@@ -12,6 +12,7 @@ Current scope:
 ## Documentation
 
 - current project status and business logic: [docs/PROJECT-STATUS.zh-CN.md](docs/PROJECT-STATUS.zh-CN.md)
+- architecture insights inspired by KubeStash concepts: [docs/KUBESTASH-INSIGHTS.zh-CN.md](docs/KUBESTASH-INSIGHTS.zh-CN.md)
 - manual validation and acceptance plan: [docs/MANUAL-TEST-PLAN.zh-CN.md](docs/MANUAL-TEST-PLAN.zh-CN.md)
 - development guide: [docs/DEVELOPMENT.zh-CN.md](docs/DEVELOPMENT.zh-CN.md)
 - environment guide: [docs/ENVIRONMENT.zh-CN.md](docs/ENVIRONMENT.zh-CN.md)
@@ -23,6 +24,7 @@ Current scope:
 - `BackupRepository`
 - `BackupPolicy`
 - `BackupRun`
+- `Snapshot`
 - `RestoreRequest`
 
 ## What Works Today
@@ -30,7 +32,9 @@ Current scope:
 - `BackupSource` / `BackupRepository` reconcile basic readiness status
 - `BackupPolicy` renders one `CronJob` per repository and cleans up stale children
 - `BackupRun` renders one `Job` per repository
+- `BackupRun` also records one `Snapshot` object per repository target
 - `RestoreRequest` renders one restore `Job`
+- `RestoreRequest` can resolve restore inputs from `snapshotRef`
 - child `Job` phase and message are aggregated back into CRD status
 - reconciliation is idempotent and naming is stable under truncation
 
@@ -137,6 +141,7 @@ By default the offline installer targets `sealos.hub:5000/kube4`. You can still 
 
 Not finished yet:
 
+- scheduled backups still reconcile directly to `CronJob`, not `BackupRun` history objects
 - Redis / MongoDB / MinIO / RabbitMQ / Milvus built-in runtimes
 - admission webhooks
 - richer metrics and events

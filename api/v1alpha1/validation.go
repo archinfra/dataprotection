@@ -98,11 +98,14 @@ func (s *RestoreRequestSpec) ValidateBasic() error {
 	if strings.TrimSpace(s.SourceRef.Name) == "" {
 		return fmt.Errorf("spec.sourceRef.name is required")
 	}
-	if s.BackupRunRef == nil && strings.TrimSpace(s.Snapshot) == "" {
-		return fmt.Errorf("spec.backupRunRef or spec.snapshot is required")
+	if s.BackupRunRef == nil && s.SnapshotRef == nil && strings.TrimSpace(s.Snapshot) == "" {
+		return fmt.Errorf("spec.backupRunRef, spec.snapshotRef or spec.snapshot is required")
 	}
 	if s.RepositoryRef != nil && strings.TrimSpace(s.RepositoryRef.Name) == "" {
 		return fmt.Errorf("spec.repositoryRef.name cannot be empty")
+	}
+	if s.SnapshotRef != nil && strings.TrimSpace(s.SnapshotRef.Name) == "" {
+		return fmt.Errorf("spec.snapshotRef.name cannot be empty")
 	}
 	if strings.TrimSpace(string(s.Target.Mode)) != "" {
 		switch s.Target.Mode {

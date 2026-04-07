@@ -4,14 +4,14 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.16.5
-  name: backuprepositories.dataprotection.archinfra.io
+  name: snapshots.dataprotection.archinfra.io
 spec:
   group: dataprotection.archinfra.io
   names:
-    kind: BackupRepository
-    listKind: BackupRepositoryList
-    plural: backuprepositories
-    singular: backuprepository
+    kind: Snapshot
+    listKind: SnapshotList
+    plural: snapshots
+    singular: snapshot
   scope: Namespaced
   versions:
   - name: v1alpha1
@@ -37,90 +37,71 @@ spec:
             type: object
           spec:
             properties:
-              default:
-                type: boolean
-              nfs:
-                description: NFSRepositorySpec NFS 类型的存储库配置
+              backupRunRef:
+                description: |-
+                  LocalObjectReference contains enough information to let you locate the
+                  referenced object inside the same namespace.
                 properties:
-                  path:
-                    description: Path NFS 导出的共享路径
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
                     type: string
-                  server:
-                    description: Server NFS 服务器地址（IP 或主机名）
-                    type: string
-                required:
-                - path
-                - server
                 type: object
-              s3:
-                description: S3RepositorySpec S3 兼容对象存储的配置
-                properties:
-                  accessKeyFrom:
-                    description: AccessKeyFrom 从 Secret 中获取 AccessKey
-                    properties:
-                      key:
-                        description: Key Secret 中存放敏感数据的字段名
-                        type: string
-                      name:
-                        description: Name Secret 的名称（位于同一命名空间）
-                        type: string
-                    required:
-                    - key
-                    - name
-                    type: object
-                  bucket:
-                    description: Bucket 存储桶名称
-                    type: string
-                  endpoint:
-                    description: Endpoint S3 服务端点（如 https://s3.amazonaws.com 或 http://minio:9000）
-                    type: string
-                  insecure:
-                    description: Insecure 是否跳过 TLS 证书验证（仅测试环境）
-                    type: boolean
-                  prefix:
-                    description: Prefix 对象键前缀（相当于子目录）
-                    type: string
-                  region:
-                    description: Region 存储桶所在区域（可选，部分兼容服务需要）
-                    type: string
-                  secretKeyFrom:
-                    description: SecretKeyFrom 从 Secret 中获取 SecretKey
-                    properties:
-                      key:
-                        description: Key Secret 中存放敏感数据的字段名
-                        type: string
-                      name:
-                        description: Name Secret 的名称（位于同一命名空间）
-                        type: string
-                    required:
-                    - key
-                    - name
-                    type: object
-                  sessionTokenFrom:
-                    description: SessionTokenFrom 从 Secret 中获取临时会话 Token（可选，用于 STS）
-                    properties:
-                      key:
-                        description: Key Secret 中存放敏感数据的字段名
-                        type: string
-                      name:
-                        description: Name Secret 的名称（位于同一命名空间）
-                        type: string
-                    required:
-                    - key
-                    - name
-                    type: object
-                required:
-                - bucket
-                - endpoint
-                type: object
-              type:
-                description: RepositoryType 定义备份存储库的类型
+                x-kubernetes-map-type: atomic
+              driver:
+                description: BackupDriver 定义支持的数据库/中间件类型，即数据驱动类型
                 type: string
+              repositoryRef:
+                description: |-
+                  LocalObjectReference contains enough information to let you locate the
+                  referenced object inside the same namespace.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+              snapshot:
+                type: string
+              sourceRef:
+                description: |-
+                  LocalObjectReference contains enough information to let you locate the
+                  referenced object inside the same namespace.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
             required:
-            - type
+            - backupRunRef
+            - driver
+            - repositoryRef
+            - snapshot
+            - sourceRef
             type: object
           status:
             properties:
+              completedAt:
+                format: date-time
+                type: string
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -177,14 +158,14 @@ spec:
                   - type
                   type: object
                 type: array
-              lastValidatedTime:
-                format: date-time
-                type: string
               observedGeneration:
                 format: int64
                 type: integer
               phase:
                 description: ResourcePhase 定义资源当前的生命周期阶段
+                type: string
+              startedAt:
+                format: date-time
                 type: string
             type: object
         type: object

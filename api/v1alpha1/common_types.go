@@ -302,6 +302,8 @@ type RepositoryRunStatus struct {
 	Message string `json:"message,omitempty"`
 	// Snapshot 备份产出物的标识（如 S3 路径或快照 ID）
 	Snapshot string `json:"snapshot,omitempty"`
+	// SnapshotRef 对应的 Snapshot CR 名称
+	SnapshotRef string `json:"snapshotRef,omitempty"`
 	// UpdatedAt 状态最近更新时间
 	UpdatedAt *metav1.Time `json:"updatedAt,omitempty"`
 }

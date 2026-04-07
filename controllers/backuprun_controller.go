@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -114,6 +115,7 @@ func (r *BackupRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	for i := range resolved.Repositories {
 		repository := &resolved.Repositories[i]
+		snapshotName := dpv1alpha1.BuildSnapshotName(run.Name, repository.Name, "snapshot")
 		desired, err := buildBackupRunJob(&run, resolved.Policy, resolved.Source, repository, snapshot)
 		if err != nil {
 			run.Status.Phase = dpv1alpha1.ResourcePhaseFailed
@@ -154,13 +156,18 @@ func (r *BackupRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			latestCompletedAt = completedAt.DeepCopy()
 		}
 		repositoryStatuses = append(repositoryStatuses, dpv1alpha1.RepositoryRunStatus{
-			Name:      repository.Name,
-			Phase:     repositoryPhase,
-			Message:   message,
-			Snapshot:  snapshot,
-			UpdatedAt: nowTime(),
+			Name:        repository.Name,
+			Phase:       repositoryPhase,
+			Message:     message,
+			Snapshot:    snapshot,
+			SnapshotRef: snapshotName,
+			UpdatedAt:   nowTime(),
 		})
 		overallPhase = combinePhases(overallPhase, repositoryPhase)
+
+		if err := r.reconcileSnapshot(ctx, &run, resolved.Source, repository, snapshot, snapshotName, repositoryPhase, completedAt, message); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	run.Status.JobNames = uniqueStrings(jobNames)
@@ -189,6 +196,90 @@ func (r *BackupRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		markCondition(&run.Status.Conditions, "Completed", metav1.ConditionFalse, "Pending", "backup jobs are pending scheduling or startup", run.Generation)
 	}
 	return patchStatus(requeueSoon(), nil)
+}
+
+func (r *BackupRunReconciler) reconcileSnapshot(
+	ctx context.Context,
+	run *dpv1alpha1.BackupRun,
+	source *dpv1alpha1.BackupSource,
+	repository *dpv1alpha1.BackupRepository,
+	snapshotValue string,
+	snapshotName string,
+	phase dpv1alpha1.ResourcePhase,
+	completedAt *metav1.Time,
+	message string,
+) error {
+	current := &dpv1alpha1.Snapshot{}
+	key := client.ObjectKey{Namespace: run.Namespace, Name: snapshotName}
+	err := r.Get(ctx, key, current)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	if apierrors.IsNotFound(err) {
+		current = &dpv1alpha1.Snapshot{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      snapshotName,
+				Namespace: run.Namespace,
+			},
+		}
+	}
+
+	original := current.DeepCopy()
+	current.Labels = mergeStringMaps(current.Labels, managedResourceLabels("BackupRun", run.Name, "snapshot", source.Name, repository.Name))
+	current.Spec = dpv1alpha1.SnapshotSpec{
+		SourceRef:     corev1.LocalObjectReference{Name: source.Name},
+		BackupRunRef:  corev1.LocalObjectReference{Name: run.Name},
+		RepositoryRef: corev1.LocalObjectReference{Name: repository.Name},
+		Driver:        source.Spec.Driver,
+		Snapshot:      snapshotValue,
+	}
+	if err := controllerutil.SetControllerReference(run, current, r.Scheme); err != nil {
+		return err
+	}
+
+	if apierrors.IsNotFound(err) {
+		if err := r.Create(ctx, current); err != nil {
+			return err
+		}
+	} else {
+		if err := r.Patch(ctx, current, client.MergeFrom(original)); err != nil {
+			return err
+		}
+	}
+
+	statusOriginal := current.DeepCopy()
+	current.Status.ObservedGeneration = current.Generation
+	if current.Status.StartedAt == nil {
+		if run.Status.StartedAt != nil {
+			current.Status.StartedAt = run.Status.StartedAt.DeepCopy()
+		} else {
+			current.Status.StartedAt = nowTime()
+		}
+	}
+	current.Status.Phase = phase
+	if phase == dpv1alpha1.ResourcePhaseSucceeded || phase == dpv1alpha1.ResourcePhaseFailed {
+		if completedAt != nil {
+			current.Status.CompletedAt = completedAt.DeepCopy()
+		} else {
+			current.Status.CompletedAt = nowTime()
+		}
+	} else {
+		current.Status.CompletedAt = nil
+	}
+
+	conditionStatus := metav1.ConditionFalse
+	reason := "Pending"
+	switch phase {
+	case dpv1alpha1.ResourcePhaseSucceeded:
+		conditionStatus = metav1.ConditionTrue
+		reason = "Ready"
+	case dpv1alpha1.ResourcePhaseFailed:
+		reason = "Failed"
+	case dpv1alpha1.ResourcePhaseRunning:
+		reason = "Running"
+	}
+	markCondition(&current.Status.Conditions, "Ready", conditionStatus, reason, message, current.Generation)
+	return r.Status().Patch(ctx, current, client.MergeFrom(statusOriginal))
 }
 
 func combinePhases(current, next dpv1alpha1.ResourcePhase) dpv1alpha1.ResourcePhase {

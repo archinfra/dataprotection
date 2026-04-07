@@ -8,6 +8,7 @@ import (
 type RestoreRequestSpec struct {
 	SourceRef     corev1.LocalObjectReference  `json:"sourceRef"`
 	BackupRunRef  *corev1.LocalObjectReference `json:"backupRunRef,omitempty"`
+	SnapshotRef   *corev1.LocalObjectReference `json:"snapshotRef,omitempty"`
 	RepositoryRef *corev1.LocalObjectReference `json:"repositoryRef,omitempty"`
 	Snapshot      string                       `json:"snapshot,omitempty"`
 	Target        RestoreTargetSpec            `json:"target,omitempty"`

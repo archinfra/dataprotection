@@ -15,6 +15,8 @@ const (
 	maxJobNameLength = 63
 	// 标签值最大长度（标准 DNS 标签长度）
 	maxLabelValueLength = 63
+	// Snapshot 名称最大长度（标准 DNS 标签长度）
+	maxSnapshotNameLength = 63
 )
 
 // BuildCronJobName 根据提供的部分构建一个合法的 CronJob 名称
@@ -33,6 +35,11 @@ func BuildJobName(parts ...string) string {
 // 内部调用 buildDNSLabelName，并传入标签值允许的最大长度
 func BuildLabelValue(parts ...string) string {
 	return buildDNSLabelName(maxLabelValueLength, parts...)
+}
+
+// BuildSnapshotName 根据提供的部分构建一个合法的 Snapshot 名称
+func BuildSnapshotName(parts ...string) string {
+	return buildDNSLabelName(maxSnapshotNameLength, parts...)
 }
 
 // sanitizeName 将原始字符串转换为符合 DNS 标签规范的字符串

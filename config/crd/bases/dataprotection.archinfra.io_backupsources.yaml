@@ -38,129 +38,171 @@ spec:
           spec:
             properties:
               driver:
+                description: BackupDriver 定义支持的数据库/中间件类型，即数据驱动类型
                 type: string
               driverConfig:
+                description: DriverConfig 各数据驱动的专用配置（联合类型）
                 properties:
                   milvus:
+                    description: Milvus Milvus 驱动配置
                     properties:
                       collections:
+                        description: Collections 要备份的集合列表，格式 "database.collection"
                         items:
                           type: string
                         type: array
                       databases:
+                        description: Databases 要备份的数据库列表（Milvus 2.2+ 支持多库）
                         items:
                           type: string
                         type: array
                       includeObjectStorage:
+                        description: IncludeObjectStorage 是否同时备份底层的对象存储数据
                         type: boolean
                     type: object
                   minio:
+                    description: MinIO MinIO 驱动配置
                     properties:
                       buckets:
+                        description: Buckets 要备份的桶列表（为空表示全部）
                         items:
                           type: string
                         type: array
                       includeVersions:
+                        description: IncludeVersions 是否备份对象的历史版本（需启用版本控制）
                         type: boolean
                       prefixes:
+                        description: Prefixes 仅备份桶内指定前缀的对象
                         items:
                           type: string
                         type: array
                     type: object
                   mongodb:
+                    description: MongoDB MongoDB 驱动配置
                     properties:
                       collections:
+                        description: Collections 要备份的集合列表，格式 "database.collection"
                         items:
                           type: string
                         type: array
                       databases:
+                        description: Databases 要备份的数据库列表（为空表示全部）
                         items:
                           type: string
                         type: array
                       includeUsersRoles:
+                        description: IncludeUsersRoles 是否同时备份用户和角色定义
                         type: boolean
                     type: object
                   mysql:
+                    description: MySQL MySQL 驱动配置
                     properties:
                       databases:
+                        description: Databases 要备份的数据库列表（为空表示全部）
                         items:
                           type: string
                         type: array
                       mode:
+                        description: Mode 操作模式：逻辑备份（logical）或物理备份（physical）
                         type: string
                       restoreMode:
+                        description: RestoreMode 恢复模式：merge（合并）、wipe-all-user-databases（清空所有用户数据库后恢复）
                         type: string
                       tables:
+                        description: Tables 要备份的表列表，格式为 "database.table"，为空表示数据库内全部表
                         items:
                           type: string
                         type: array
                     type: object
                   rabbitmq:
+                    description: RabbitMQ RabbitMQ 驱动配置
                     properties:
                       includeDefinitions:
+                        description: IncludeDefinitions 是否备份交换机、队列、绑定等定义
                         type: boolean
                       queues:
+                        description: Queues 要备份的队列列表，格式 "vhost/queueName"
                         items:
                           type: string
                         type: array
                       vhosts:
+                        description: Vhosts 要备份的虚拟主机列表（为空表示所有 vhost）
                         items:
                           type: string
                         type: array
                     type: object
                   redis:
+                    description: Redis Redis 驱动配置
                     properties:
                       databases:
+                        description: Databases 要备份的数据库索引列表（-1 表示所有）
                         items:
                           format: int32
                           type: integer
                         type: array
                       keyPrefix:
+                        description: KeyPrefix 仅备份匹配指定前缀的键（支持通配符）
                         items:
                           type: string
                         type: array
                       mode:
+                        description: Mode 模式：rdb（快照）、aof（追加日志）或混合
                         type: string
                     type: object
                 type: object
               endpoint:
+                description: EndpointSpec 描述一个数据服务的连接端点
                 properties:
                   host:
+                    description: Host 服务主机名或 IP
                     type: string
                   passwordFrom:
+                    description: PasswordFrom 从 Secret 中获取密码（必填）
                     properties:
                       key:
+                        description: Key Secret 中存放敏感数据的字段名
                         type: string
                       name:
+                        description: Name Secret 的名称（位于同一命名空间）
                         type: string
                     required:
                     - key
                     - name
                     type: object
                   port:
+                    description: Port 服务端口
                     format: int32
                     type: integer
                   scheme:
+                    description: Scheme 连接协议（如 http, https, tcp）
                     type: string
                   serviceRef:
+                    description: ServiceRef 可选的 Service 引用，优先级高于 Host/Port
                     properties:
                       name:
+                        description: Name Service 名称
                         type: string
                       namespace:
+                        description: Namespace Service 所在命名空间（默认为当前资源的命名空间）
                         type: string
                       port:
+                        description: Port Service 的端口号
                         format: int32
                         type: integer
                     required:
                     - name
                     type: object
                   username:
+                    description: Username 明文用户名（不推荐）
                     type: string
                   usernameFrom:
+                    description: UsernameFrom 从 Secret 中获取用户名
                     properties:
                       key:
+                        description: Key Secret 中存放敏感数据的字段名
                         type: string
                       name:
+                        description: Name Secret 的名称（位于同一命名空间）
                         type: string
                     required:
                     - key
@@ -170,14 +212,19 @@ spec:
               paused:
                 type: boolean
               targetRef:
+                description: NamespacedObjectReference 引用任意 Kubernetes 对象
                 properties:
                   apiVersion:
+                    description: APIVersion 对象的 API 版本
                     type: string
                   kind:
+                    description: Kind 对象的资源类型
                     type: string
                   name:
+                    description: Name 对象名称
                     type: string
                   namespace:
+                    description: Namespace 对象所在命名空间
                     type: string
                 required:
                 - name
@@ -250,6 +297,7 @@ spec:
                 format: int64
                 type: integer
               phase:
+                description: ResourcePhase 定义资源当前的生命周期阶段
                 type: string
             type: object
         type: object

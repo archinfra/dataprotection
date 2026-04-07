@@ -86,6 +86,14 @@ func getBackupRun(ctx context.Context, c client.Client, namespace, name string) 
 	return &run, nil
 }
 
+func getSnapshot(ctx context.Context, c client.Client, namespace, name string) (*dpv1alpha1.Snapshot, error) {
+	var snapshot dpv1alpha1.Snapshot
+	if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &snapshot); err != nil {
+		return nil, err
+	}
+	return &snapshot, nil
+}
+
 func resolveRepositories(ctx context.Context, c client.Client, namespace string, refs []corev1.LocalObjectReference) ([]dpv1alpha1.BackupRepository, error) {
 	repositories := make([]dpv1alpha1.BackupRepository, 0, len(refs))
 	for _, ref := range refs {
@@ -130,19 +138,37 @@ func resolveBackupRunRefs(ctx context.Context, c client.Client, run *dpv1alpha1.
 	return result, nil
 }
 
-func resolveRestoreRepository(ctx context.Context, c client.Client, restore *dpv1alpha1.RestoreRequest) (*dpv1alpha1.BackupRun, *dpv1alpha1.BackupRepository, error) {
+func resolveRestoreRepository(ctx context.Context, c client.Client, restore *dpv1alpha1.RestoreRequest) (*dpv1alpha1.BackupRun, *dpv1alpha1.Snapshot, *dpv1alpha1.BackupRepository, error) {
 	var backupRun *dpv1alpha1.BackupRun
+	var snapshot *dpv1alpha1.Snapshot
 	if restore.Spec.BackupRunRef != nil && strings.TrimSpace(restore.Spec.BackupRunRef.Name) != "" {
 		resolvedRun, err := getBackupRun(ctx, c, restore.Namespace, restore.Spec.BackupRunRef.Name)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		backupRun = resolvedRun
+	}
+	if restore.Spec.SnapshotRef != nil && strings.TrimSpace(restore.Spec.SnapshotRef.Name) != "" {
+		resolvedSnapshot, err := getSnapshot(ctx, c, restore.Namespace, restore.Spec.SnapshotRef.Name)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		snapshot = resolvedSnapshot
+		if backupRun == nil && strings.TrimSpace(snapshot.Spec.BackupRunRef.Name) != "" {
+			resolvedRun, err := getBackupRun(ctx, c, restore.Namespace, snapshot.Spec.BackupRunRef.Name)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			backupRun = resolvedRun
+		}
 	}
 
 	repositoryName := ""
 	if restore.Spec.RepositoryRef != nil {
 		repositoryName = strings.TrimSpace(restore.Spec.RepositoryRef.Name)
+	}
+	if repositoryName == "" && snapshot != nil {
+		repositoryName = strings.TrimSpace(snapshot.Spec.RepositoryRef.Name)
 	}
 
 	if repositoryName == "" && backupRun != nil {
@@ -163,23 +189,23 @@ func resolveRestoreRepository(ctx context.Context, c client.Client, restore *dpv
 		candidateNames = uniqueStrings(candidateNames)
 		switch len(candidateNames) {
 		case 0:
-			return backupRun, nil, newPermanentDependencyError("unable to determine repository from backupRun %q", backupRun.Name)
+			return backupRun, snapshot, nil, newPermanentDependencyError("unable to determine repository from backupRun %q", backupRun.Name)
 		case 1:
 			repositoryName = candidateNames[0]
 		default:
-			return backupRun, nil, newPermanentDependencyError("spec.repositoryRef is required because backupRun %q spans multiple repositories: %s", backupRun.Name, strings.Join(candidateNames, ", "))
+			return backupRun, snapshot, nil, newPermanentDependencyError("spec.repositoryRef is required because backupRun %q spans multiple repositories: %s", backupRun.Name, strings.Join(candidateNames, ", "))
 		}
 	}
 
 	if repositoryName == "" {
-		return backupRun, nil, newPermanentDependencyError("spec.repositoryRef is required")
+		return backupRun, snapshot, nil, newPermanentDependencyError("spec.repositoryRef is required")
 	}
 
 	repository, err := getBackupRepository(ctx, c, restore.Namespace, repositoryName)
 	if err != nil {
-		return backupRun, nil, err
+		return backupRun, snapshot, nil, err
 	}
-	return backupRun, repository, nil
+	return backupRun, snapshot, repository, nil
 }
 
 func defaultExecutionTemplate(spec dpv1alpha1.ExecutionTemplateSpec) dpv1alpha1.ExecutionTemplateSpec {

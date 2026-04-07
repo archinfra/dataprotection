@@ -6,9 +6,9 @@ metadata:
 spec:
   sourceRef:
     name: mysql-prod
-  snapshot: latest
-  repositoryRef:
-    name: minio-dc2
+  # 推荐优先使用 snapshotRef；保留 snapshot + repositoryRef 作为兼容入口
+  snapshotRef:
+    name: mysql-prod-manual-minio-dc2-snapshot
   target:
     mode: InPlace
     driverConfig:
