@@ -37,7 +37,7 @@ test:
 
 .PHONY: build
 build:
-	CGO_ENABLED=0 $(GO) build -o bin/data-protection-operator ./main.go
+	CGO_ENABLED=0 $(GO) build -o bin/data-protection-operator .
 
 .PHONY: docker-build
 docker-build:

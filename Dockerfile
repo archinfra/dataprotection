@@ -13,9 +13,9 @@ RUN go mod download
 
 COPY api ./api
 COPY controllers ./controllers
-COPY main.go ./
+COPY *.go ./
 
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w" -o /out/data-protection-operator ./main.go
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w" -o /out/data-protection-operator .
 
 FROM gcr.io/distroless/static:nonroot
 
