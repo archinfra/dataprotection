@@ -7,7 +7,7 @@
 set -Eeuo pipefail
 
 APP_NAME="data-protection-operator"
-APP_VERSION="${APP_VERSION:-0.2.0}"
+APP_VERSION="${APP_VERSION:-0.2.1}"
 WORKDIR="/tmp/${APP_NAME}-installer"
 IMAGE_DIR="${WORKDIR}/images"
 MANIFEST_DIR="${WORKDIR}/manifests"

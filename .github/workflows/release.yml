@@ -26,6 +26,8 @@ jobs:
       mysql_aliyun: ${{ steps.meta.outputs.mysql_aliyun }}
       mc_dockerhub: ${{ steps.meta.outputs.mc_dockerhub }}
       mc_aliyun: ${{ steps.meta.outputs.mc_aliyun }}
+      redis_dockerhub: ${{ steps.meta.outputs.redis_dockerhub }}
+      redis_aliyun: ${{ steps.meta.outputs.redis_aliyun }}
       busybox_dockerhub: ${{ steps.meta.outputs.busybox_dockerhub }}
       busybox_aliyun: ${{ steps.meta.outputs.busybox_aliyun }}
     steps:
@@ -96,19 +98,23 @@ jobs:
             if [[ "${publish_dockerhub}" == "true" ]]; then
               echo "mysql_dockerhub=docker.io/${dockerhub_namespace}/dataprotection-mysql:8.0.45"
               echo "mc_dockerhub=docker.io/${dockerhub_namespace}/dataprotection-minio-mc:latest"
+              echo "redis_dockerhub=docker.io/${dockerhub_namespace}/dataprotection-redis:7.2.7-alpine"
               echo "busybox_dockerhub=docker.io/${dockerhub_namespace}/dataprotection-busybox:1.36"
             else
               echo "mysql_dockerhub="
               echo "mc_dockerhub="
+              echo "redis_dockerhub="
               echo "busybox_dockerhub="
             fi
             if [[ "${publish_aliyun}" == "true" ]]; then
               echo "mysql_aliyun=${aliyun_registry}/${aliyun_namespace}/dataprotection-mysql:8.0.45"
               echo "mc_aliyun=${aliyun_registry}/${aliyun_namespace}/dataprotection-minio-mc:latest"
+              echo "redis_aliyun=${aliyun_registry}/${aliyun_namespace}/dataprotection-redis:7.2.7-alpine"
               echo "busybox_aliyun=${aliyun_registry}/${aliyun_namespace}/dataprotection-busybox:1.36"
             else
               echo "mysql_aliyun="
               echo "mc_aliyun="
+              echo "redis_aliyun="
               echo "busybox_aliyun="
             fi
             echo "operator_tags<<EOF"
@@ -174,8 +180,17 @@ jobs:
       - name: Setup QEMU
         uses: docker/setup-qemu-action@v3
 
+      - name: Configure Docker Hub mirror
+        run: |
+          echo '{"registry-mirrors":["https://mirror.gcr.io"]}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker
+
       - name: Setup Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["mirror.gcr.io"]
 
       - name: Login Docker Hub
         if: needs.prepare.outputs.publish_dockerhub == 'true'
@@ -209,6 +224,8 @@ jobs:
           MYSQL_ALIYUN: ${{ needs.prepare.outputs.mysql_aliyun }}
           MC_DOCKERHUB: ${{ needs.prepare.outputs.mc_dockerhub }}
           MC_ALIYUN: ${{ needs.prepare.outputs.mc_aliyun }}
+          REDIS_DOCKERHUB: ${{ needs.prepare.outputs.redis_dockerhub }}
+          REDIS_ALIYUN: ${{ needs.prepare.outputs.redis_aliyun }}
           BUSYBOX_DOCKERHUB: ${{ needs.prepare.outputs.busybox_dockerhub }}
           BUSYBOX_ALIYUN: ${{ needs.prepare.outputs.busybox_aliyun }}
         run: |
@@ -227,9 +244,10 @@ jobs:
             fi
           }
 
-          create_aliases "mysql:8.0.45" "${MYSQL_DOCKERHUB}" "${MYSQL_ALIYUN}"
+          create_aliases "public.ecr.aws/docker/library/mysql:8.0.45" "${MYSQL_DOCKERHUB}" "${MYSQL_ALIYUN}"
           create_aliases "minio/mc:latest" "${MC_DOCKERHUB}" "${MC_ALIYUN}"
-          create_aliases "busybox:1.36" "${BUSYBOX_DOCKERHUB}" "${BUSYBOX_ALIYUN}"
+          create_aliases "public.ecr.aws/docker/library/redis:7.2.7-alpine" "${REDIS_DOCKERHUB}" "${REDIS_ALIYUN}"
+          create_aliases "public.ecr.aws/docker/library/busybox:1.36" "${BUSYBOX_DOCKERHUB}" "${BUSYBOX_ALIYUN}"
 
   build-installers:
     runs-on: ubuntu-latest
@@ -257,8 +275,17 @@ jobs:
       - name: Setup QEMU
         uses: docker/setup-qemu-action@v3
 
+      - name: Configure Docker Hub mirror
+        run: |
+          echo '{"registry-mirrors":["https://mirror.gcr.io"]}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker
+
       - name: Setup Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["mirror.gcr.io"]
 
       - name: Build offline installer
         run: bash build.sh --arch ${{ matrix.arch }}
