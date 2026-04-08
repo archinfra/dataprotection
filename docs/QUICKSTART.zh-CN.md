@@ -147,6 +147,7 @@ kubectl get bst -A
 kubectl get bp -A
 kubectl get br -A
 kubectl get snap -A
+kubectl get sn -A
 kubectl get rr -A
 kubectl get rp -A
 ```

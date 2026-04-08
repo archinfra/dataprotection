@@ -7,4 +7,4 @@ spec:
   successfulSnapshots:
     last: 3
   failedSnapshots:
-    last: 1
+    last: 3

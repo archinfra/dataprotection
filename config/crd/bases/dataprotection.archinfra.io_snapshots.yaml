@@ -13,6 +13,7 @@ spec:
     plural: snapshots
     shortNames:
     - snap
+    - sn
     singular: snapshot
   scope: Namespaced
   versions:
@@ -41,7 +42,6 @@ spec:
       type: string
     - jsonPath: .status.message
       name: Message
-      priority: 1
       type: string
     name: v1alpha1
     schema:

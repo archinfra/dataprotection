@@ -37,7 +37,7 @@ type BackupRunStatus struct {
 // +kubebuilder:printcolumn:name="Source",type=string,JSONPath=`.spec.sourceRef.name`
 // +kubebuilder:printcolumn:name="Completed",type=date,JSONPath=`.status.completedAt`
 // +kubebuilder:printcolumn:name="Snapshot",type=string,priority=1,JSONPath=`.spec.snapshot`
-// +kubebuilder:printcolumn:name="Message",type=string,priority=1,JSONPath=`.status.message`
+// +kubebuilder:printcolumn:name="Message",type=string,JSONPath=`.status.message`
 // +kubebuilder:resource:shortName=br
 type BackupRun struct {
 	metav1.TypeMeta   `json:",inline"`

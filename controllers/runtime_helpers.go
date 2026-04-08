@@ -174,6 +174,13 @@ func resolveRestoreStorage(
 		if err != nil {
 			return nil, nil, nil, "", err
 		}
+		if resolvedSnapshot.Status.Phase != dpv1alpha1.ResourcePhaseSucceeded || !resolvedSnapshot.Status.ArtifactReady {
+			return nil, nil, nil, "", newPermanentDependencyError(
+				"snapshot %q is not ready for restore; phase=%s",
+				resolvedSnapshot.Name,
+				resolvedSnapshot.Status.Phase,
+			)
+		}
 		snapshot = resolvedSnapshot
 		if backupRun == nil && strings.TrimSpace(snapshot.Spec.BackupRunRef.Name) != "" {
 			resolvedRun, err := getBackupRun(ctx, c, restore.Namespace, snapshot.Spec.BackupRunRef.Name)
@@ -227,14 +234,27 @@ func resolveRestoreStorage(
 		return backupRun, snapshot, nil, "", newPermanentDependencyError("referenced BackupStorage %q is invalid: %v", storage.Name, err)
 	}
 
+	var storageStatus *dpv1alpha1.StorageRunStatus
+	if backupRun != nil {
+		for i := range backupRun.Status.Storages {
+			if backupRun.Status.Storages[i].Name == storage.Name {
+				storageStatus = &backupRun.Status.Storages[i]
+				break
+			}
+		}
+	}
+
 	storagePath := trimString(restore.Spec.StoragePath)
 	if storagePath == "" && snapshot != nil {
 		storagePath = trimString(snapshot.Spec.StoragePath)
 	}
+	if storagePath == "" && storageStatus != nil && trimString(storageStatus.StoragePath) != "" {
+		storagePath = trimString(storageStatus.StoragePath)
+	}
 	if storagePath == "" && backupRun != nil {
-		for _, storageStatus := range backupRun.Status.Storages {
-			if storageStatus.Name == storage.Name && trimString(storageStatus.StoragePath) != "" {
-				storagePath = trimString(storageStatus.StoragePath)
+		for _, branchStatus := range backupRun.Status.Storages {
+			if branchStatus.Name == storage.Name && trimString(branchStatus.StoragePath) != "" {
+				storagePath = trimString(branchStatus.StoragePath)
 				break
 			}
 		}
@@ -251,6 +271,17 @@ func resolveRestoreStorage(
 	}
 	if storagePath == "" {
 		return backupRun, snapshot, nil, "", newPermanentDependencyError("spec.storagePath is required when restoring from a raw snapshot without snapshotRef or backupRunRef")
+	}
+
+	if snapshot == nil && strings.TrimSpace(restore.Spec.Snapshot) == "" && storageStatus != nil {
+		if storageStatus.Phase != dpv1alpha1.ResourcePhaseSucceeded || trimString(storageStatus.Snapshot) == "" {
+			return backupRun, nil, nil, "", newPermanentDependencyError(
+				"backupRun %q storage %q does not have a successful snapshot artifact; phase=%s",
+				backupRun.Name,
+				storage.Name,
+				storageStatus.Phase,
+			)
+		}
 	}
 
 	return backupRun, snapshot, storage, storagePath, nil
@@ -896,7 +927,7 @@ func jobPhase(job *batchv1.Job) (dpv1alpha1.ResourcePhase, string, *metav1.Time)
 	for _, condition := range job.Status.Conditions {
 		if condition.Type == batchv1.JobFailed && condition.Status == corev1.ConditionTrue {
 			completedAt := condition.LastTransitionTime
-			return dpv1alpha1.ResourcePhaseFailed, coalesceConditionMessage(condition, "job failed"), &completedAt
+			return dpv1alpha1.ResourcePhaseFailed, normalizeJobFailureMessage(condition), &completedAt
 		}
 		if condition.Type == batchv1.JobComplete && condition.Status == corev1.ConditionTrue {
 			completedAt := condition.LastTransitionTime
@@ -914,6 +945,16 @@ func jobPhase(job *batchv1.Job) (dpv1alpha1.ResourcePhase, string, *metav1.Time)
 		return dpv1alpha1.ResourcePhaseRunning, fmt.Sprintf("job has %d failed pod attempt(s) and may retry", job.Status.Failed), nil
 	}
 	return dpv1alpha1.ResourcePhasePending, "job is pending scheduling or startup", nil
+}
+
+func normalizeJobFailureMessage(condition batchv1.JobCondition) string {
+	reason := strings.TrimSpace(condition.Reason)
+	message := strings.TrimSpace(condition.Message)
+	lowerMessage := strings.ToLower(message)
+	if reason == "BackoffLimitExceeded" || strings.Contains(lowerMessage, "backoff limit") {
+		return "job retry budget exhausted (backoffLimit reached); inspect the latest Pod logs"
+	}
+	return coalesceConditionMessage(condition, "job failed")
 }
 
 func coalesceConditionMessage(condition batchv1.JobCondition, fallback string) string {

@@ -100,7 +100,6 @@ func (r *BackupRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	keepLast := retentionValue(dpv1alpha1.RetentionRule{})
-	failedKeepLast := int32(0)
 	if resolved.Policy != nil {
 		resolvedKeepLast, _, err := resolveKeepLastRetention(ctx, r.Client, run.Namespace, resolved.Policy.Spec.Retention, localRefName(resolved.Policy.Spec.RetentionPolicyRef))
 		if err != nil {
@@ -126,30 +125,6 @@ func (r *BackupRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			}
 		}
 		keepLast = resolvedKeepLast
-		resolvedFailedKeepLast, _, err := resolveFailedRetention(ctx, r.Client, run.Namespace, localRefName(resolved.Policy.Spec.RetentionPolicyRef))
-		if err != nil {
-			run.Status.JobNames = nil
-			run.Status.Storages = nil
-			switch {
-			case isDependencyMissing(err):
-				run.Status.Phase = dpv1alpha1.ResourcePhasePending
-				run.Status.CompletedAt = nil
-				run.Status.Message = err.Error()
-				markCondition(&run.Status.Conditions, "Accepted", metav1.ConditionFalse, "DependencyNotReady", err.Error(), run.Generation)
-				markCondition(&run.Status.Conditions, "Completed", metav1.ConditionFalse, "DependencyNotReady", phaseMessage(run.Status.Phase), run.Generation)
-				return patchStatus(requeueSoon(), nil)
-			case isPermanentDependencyError(err):
-				run.Status.Phase = dpv1alpha1.ResourcePhaseFailed
-				run.Status.CompletedAt = nowTime()
-				run.Status.Message = err.Error()
-				markCondition(&run.Status.Conditions, "Accepted", metav1.ConditionFalse, "InvalidRetentionPolicy", err.Error(), run.Generation)
-				markCondition(&run.Status.Conditions, "Completed", metav1.ConditionFalse, "InvalidRetentionPolicy", err.Error(), run.Generation)
-				return patchStatus(ctrl.Result{}, nil)
-			default:
-				return ctrl.Result{}, err
-			}
-		}
-		failedKeepLast = resolvedFailedKeepLast
 	}
 
 	jobNames := make([]string, 0, len(resolved.Storages))
@@ -204,21 +179,33 @@ func (r *BackupRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		if completedAt != nil && (latestCompletedAt == nil || completedAt.After(latestCompletedAt.Time)) {
 			latestCompletedAt = completedAt.DeepCopy()
 		}
+		storageSnapshot := ""
+		storageSnapshotRef := ""
+		if storagePhase == dpv1alpha1.ResourcePhaseSucceeded {
+			storageSnapshot = snapshot
+			storageSnapshotRef = snapshotName
+		}
 		storageStatuses = append(storageStatuses, dpv1alpha1.StorageRunStatus{
 			Name:        storage.Name,
 			Phase:       storagePhase,
 			Message:     message,
 			StoragePath: resolved.StoragePath,
-			Snapshot:    snapshot,
-			SnapshotRef: snapshotName,
+			Snapshot:    storageSnapshot,
+			SnapshotRef: storageSnapshotRef,
 			UpdatedAt:   nowTime(),
 		})
 		overallPhase = combinePhases(overallPhase, storagePhase)
 
-		if err := r.reconcileSnapshot(ctx, &run, resolved.Source, storage, resolved.StoragePath, snapshot, snapshotName, storagePhase, completedAt, message); err != nil {
-			return ctrl.Result{}, err
+		if storagePhase == dpv1alpha1.ResourcePhaseSucceeded {
+			if err := r.reconcileSnapshot(ctx, &run, resolved.Source, storage, resolved.StoragePath, snapshot, snapshotName, storagePhase, completedAt, message); err != nil {
+				return ctrl.Result{}, err
+			}
+		} else {
+			if err := r.deleteSnapshotIfExists(ctx, run.Namespace, snapshotName); err != nil {
+				return ctrl.Result{}, err
+			}
 		}
-		if err := r.reconcileSnapshotSeries(ctx, &run, resolved.Source, storage, resolved.StoragePath, keepLast, failedKeepLast); err != nil {
+		if err := r.reconcileSnapshotSeries(ctx, &run, resolved.Source, storage, resolved.StoragePath, keepLast); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
@@ -346,6 +333,20 @@ func (r *BackupRunReconciler) reconcileSnapshot(
 	return r.Status().Patch(ctx, current, client.MergeFrom(statusOriginal))
 }
 
+func (r *BackupRunReconciler) deleteSnapshotIfExists(ctx context.Context, namespace, snapshotName string) error {
+	current := &dpv1alpha1.Snapshot{}
+	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: snapshotName}, current); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	if err := r.Delete(ctx, current); err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	return nil
+}
+
 func (r *BackupRunReconciler) reconcileSnapshotSeries(
 	ctx context.Context,
 	run *dpv1alpha1.BackupRun,
@@ -353,7 +354,6 @@ func (r *BackupRunReconciler) reconcileSnapshotSeries(
 	storage *dpv1alpha1.BackupStorage,
 	storagePath string,
 	keepLast int32,
-	failedKeepLast int32,
 ) error {
 	var snapshotList dpv1alpha1.SnapshotList
 	if err := r.List(ctx, &snapshotList, client.InNamespace(run.Namespace)); err != nil {
@@ -382,7 +382,6 @@ func (r *BackupRunReconciler) reconcileSnapshotSeries(
 
 	var latestSuccessful string
 	successCount := int32(0)
-	failedCount := int32(0)
 	for _, snapshot := range series {
 		if snapshot.Status.Phase == dpv1alpha1.ResourcePhaseSucceeded && latestSuccessful == "" {
 			latestSuccessful = snapshot.Name
@@ -396,10 +395,10 @@ func (r *BackupRunReconciler) reconcileSnapshotSeries(
 			successCount++
 			shouldDelete = keepLast > 0 && successCount > keepLast
 		case dpv1alpha1.ResourcePhaseFailed:
-			if failedKeepLast > 0 {
-				failedCount++
-				shouldDelete = failedCount > failedKeepLast
-			}
+			// Snapshot now represents a recoverable artifact. Failed backup
+			// attempts stay on BackupRun status instead of being retained as
+			// pseudo-snapshots.
+			shouldDelete = true
 		}
 		if shouldDelete {
 			if err := r.Delete(ctx, snapshot); err != nil && !apierrors.IsNotFound(err) {

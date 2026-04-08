@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -234,7 +235,10 @@ func TestRestoreRequestReconcileUsesSnapshotStoragePath(t *testing.T) {
 			Driver:       dpv1alpha1.BackupDriverMySQL,
 			Snapshot:     "snapshot-001",
 		},
-		Status: dpv1alpha1.SnapshotStatus{Phase: dpv1alpha1.ResourcePhaseSucceeded},
+		Status: dpv1alpha1.SnapshotStatus{
+			Phase:         dpv1alpha1.ResourcePhaseSucceeded,
+			ArtifactReady: true,
+		},
 	}
 	restore := &dpv1alpha1.RestoreRequest{
 		ObjectMeta: metav1.ObjectMeta{Name: "restore-by-snapshot", Namespace: "backup-system", UID: types.UID("restore-uid")},
@@ -263,6 +267,125 @@ func TestRestoreRequestReconcileUsesSnapshotStoragePath(t *testing.T) {
 	}
 	if got := job.Annotations[storagePathAnnotation]; got != snapshot.Spec.StoragePath {
 		t.Fatalf("expected storage path annotation %q, got %q", snapshot.Spec.StoragePath, got)
+	}
+}
+
+func TestBackupRunReconcileDoesNotRetainFailedSnapshots(t *testing.T) {
+	scheme := newTestScheme(t)
+	ctx := context.Background()
+
+	source := newMySQLSource("backup-system", "mysql-prod")
+	storage := newS3Storage("backup-system", "minio-primary", "smoke")
+	run := &dpv1alpha1.BackupRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "scheduled-failed", Namespace: "backup-system", UID: types.UID("run-failed-uid")},
+		Spec: dpv1alpha1.BackupRunSpec{
+			SourceRef:   corev1.LocalObjectReference{Name: source.Name},
+			StorageRefs: []corev1.LocalObjectReference{{Name: storage.Name}},
+		},
+	}
+
+	fakeClient := newFakeClient(t, scheme, source, storage, run)
+	reconciler := &BackupRunReconciler{Client: fakeClient, Scheme: scheme}
+
+	req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(run)}
+	if _, err := reconciler.Reconcile(ctx, req); err != nil {
+		t.Fatalf("first reconcile failed: %v", err)
+	}
+
+	jobName := dpv1alpha1.BuildJobName(run.Name, storage.Name)
+	var job batchv1.Job
+	if err := fakeClient.Get(ctx, types.NamespacedName{Namespace: run.Namespace, Name: jobName}, &job); err != nil {
+		t.Fatalf("expected job %s: %v", jobName, err)
+	}
+	job.Status.Failed = 1
+	job.Status.Conditions = []batchv1.JobCondition{{
+		Type:               batchv1.JobFailed,
+		Status:             corev1.ConditionTrue,
+		Reason:             "BackoffLimitExceeded",
+		Message:            "Job has reached the specified backoff limit",
+		LastTransitionTime: metav1.Now(),
+	}}
+	if err := fakeClient.Status().Update(ctx, &job); err != nil {
+		t.Fatalf("update job status %s: %v", jobName, err)
+	}
+
+	if _, err := reconciler.Reconcile(ctx, req); err != nil {
+		t.Fatalf("second reconcile failed: %v", err)
+	}
+
+	var updatedRun dpv1alpha1.BackupRun
+	if err := fakeClient.Get(ctx, client.ObjectKeyFromObject(run), &updatedRun); err != nil {
+		t.Fatalf("get updated run: %v", err)
+	}
+	if updatedRun.Status.Phase != dpv1alpha1.ResourcePhaseFailed {
+		t.Fatalf("expected failed phase, got %s", updatedRun.Status.Phase)
+	}
+	if len(updatedRun.Status.Storages) != 1 {
+		t.Fatalf("expected one storage status, got %d", len(updatedRun.Status.Storages))
+	}
+	if updatedRun.Status.Storages[0].SnapshotRef != "" {
+		t.Fatalf("expected failed storage branch to have empty snapshotRef, got %q", updatedRun.Status.Storages[0].SnapshotRef)
+	}
+	if updatedRun.Status.Storages[0].Snapshot != "" {
+		t.Fatalf("expected failed storage branch to have empty snapshot name, got %q", updatedRun.Status.Storages[0].Snapshot)
+	}
+	if updatedRun.Status.Storages[0].Message != "job retry budget exhausted (backoffLimit reached); inspect the latest Pod logs" {
+		t.Fatalf("unexpected failed job message: %q", updatedRun.Status.Storages[0].Message)
+	}
+
+	snapshotName := dpv1alpha1.BuildSnapshotName(run.Name, storage.Name, "snapshot")
+	var snapshot dpv1alpha1.Snapshot
+	if err := fakeClient.Get(ctx, types.NamespacedName{Namespace: run.Namespace, Name: snapshotName}, &snapshot); err == nil {
+		t.Fatalf("did not expect failed run snapshot %s to exist", snapshotName)
+	}
+}
+
+func TestRestoreRequestReconcileRejectsFailedSnapshot(t *testing.T) {
+	scheme := newTestScheme(t)
+	ctx := context.Background()
+
+	source := newMySQLSource("backup-system", "mysql-prod")
+	storage := newS3Storage("backup-system", "minio-primary", "smoke")
+	snapshot := &dpv1alpha1.Snapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "failed-snapshot", Namespace: "backup-system", UID: types.UID("snapshot-failed-uid")},
+		Spec: dpv1alpha1.SnapshotSpec{
+			SourceRef:   corev1.LocalObjectReference{Name: source.Name},
+			StorageRef:  corev1.LocalObjectReference{Name: storage.Name},
+			StoragePath: "backups/mysql/backup-system/mysql-prod/policies/mysql-daily",
+			Driver:      dpv1alpha1.BackupDriverMySQL,
+			Snapshot:    "failed.sql.gz",
+		},
+		Status: dpv1alpha1.SnapshotStatus{
+			Phase:         dpv1alpha1.ResourcePhaseFailed,
+			ArtifactReady: false,
+		},
+	}
+	restore := &dpv1alpha1.RestoreRequest{
+		ObjectMeta: metav1.ObjectMeta{Name: "restore-failed-snapshot", Namespace: "backup-system", UID: types.UID("restore-failed-snapshot-uid")},
+		Spec: dpv1alpha1.RestoreRequestSpec{
+			SourceRef:   corev1.LocalObjectReference{Name: source.Name},
+			SnapshotRef: &corev1.LocalObjectReference{Name: snapshot.Name},
+			Target:      dpv1alpha1.RestoreTargetSpec{Mode: dpv1alpha1.RestoreTargetModeInPlace},
+		},
+	}
+
+	fakeClient := newFakeClient(t, scheme, source, storage, snapshot, restore)
+	reconciler := &RestoreRequestReconciler{Client: fakeClient, Scheme: scheme}
+
+	req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(restore)}
+	if _, err := reconciler.Reconcile(ctx, req); err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+
+	var updated dpv1alpha1.RestoreRequest
+	if err := fakeClient.Get(ctx, client.ObjectKeyFromObject(restore), &updated); err != nil {
+		t.Fatalf("get updated restore: %v", err)
+	}
+	if updated.Status.Phase != dpv1alpha1.ResourcePhaseFailed {
+		t.Fatalf("expected failed phase, got %s", updated.Status.Phase)
+	}
+	if !strings.Contains(updated.Status.Message, "is not ready for restore") {
+		t.Fatalf("expected not-ready restore message, got %q", updated.Status.Message)
 	}
 }
 

@@ -36,8 +36,8 @@ type SnapshotStatus struct {
 // +kubebuilder:printcolumn:name="Storage",type=string,JSONPath=`.spec.storageRef.name`
 // +kubebuilder:printcolumn:name="Completed",type=date,JSONPath=`.status.completedAt`
 // +kubebuilder:printcolumn:name="Snapshot",type=string,priority=1,JSONPath=`.spec.snapshot`
-// +kubebuilder:printcolumn:name="Message",type=string,priority=1,JSONPath=`.status.message`
-// +kubebuilder:resource:shortName=snap
+// +kubebuilder:printcolumn:name="Message",type=string,JSONPath=`.status.message`
+// +kubebuilder:resource:shortName=snap;sn
 type Snapshot struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
