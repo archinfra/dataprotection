@@ -1,0 +1,13 @@
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: BackupRun
+metadata:
+  name: mysql-smoke-manual
+  namespace: backup-system
+spec:
+  policyRef:
+    name: mysql-smoke-daily
+  sourceRef:
+    name: mysql-smoke
+  storageRefs:
+    - name: minio-primary
+  reason: manual smoke backup

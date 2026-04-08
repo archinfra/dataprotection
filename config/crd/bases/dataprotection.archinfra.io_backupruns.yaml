@@ -11,6 +11,8 @@ spec:
     kind: BackupRun
     listKind: BackupRunList
     plural: backupruns
+    shortNames:
+    - br
     singular: backuprun
   scope: Namespaced
   versions:

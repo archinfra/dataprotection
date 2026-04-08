@@ -11,6 +11,8 @@ spec:
     kind: BackupSource
     listKind: BackupSourceList
     plural: backupsources
+    shortNames:
+    - bsrc
     singular: backupsource
   scope: Namespaced
   versions:

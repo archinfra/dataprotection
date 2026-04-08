@@ -1,0 +1,10 @@
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: RetentionPolicy
+metadata:
+  name: mysql-daily-retention
+  namespace: backup-system
+spec:
+  successfulSnapshots:
+    last: 3
+  failedSnapshots:
+    last: 1

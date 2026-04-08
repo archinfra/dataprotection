@@ -11,6 +11,8 @@ spec:
     kind: BackupPolicy
     listKind: BackupPolicyList
     plural: backuppolicies
+    shortNames:
+    - bp
     singular: backuppolicy
   scope: Namespaced
   versions:

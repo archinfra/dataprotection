@@ -11,6 +11,8 @@ spec:
     kind: RetentionPolicy
     listKind: RetentionPolicyList
     plural: retentionpolicies
+    shortNames:
+    - rp
     singular: retentionpolicy
   scope: Namespaced
   versions:

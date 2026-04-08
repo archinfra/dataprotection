@@ -11,6 +11,8 @@ spec:
     kind: RestoreRequest
     listKind: RestoreRequestList
     plural: restorerequests
+    shortNames:
+    - rr
     singular: restorerequest
   scope: Namespaced
   versions:

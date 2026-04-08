@@ -1,0 +1,17 @@
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: BackupStorage
+metadata:
+  name: minio-primary
+  namespace: backup-system
+spec:
+  type: s3
+  s3:
+    endpoint: http://minio.minio.svc.cluster.local:9000
+    bucket: test
+    prefix: smoke
+    accessKeyFrom:
+      name: minio-credentials
+      key: access-key
+    secretKeyFrom:
+      name: minio-credentials
+      key: secret-key

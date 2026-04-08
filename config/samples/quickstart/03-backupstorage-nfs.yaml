@@ -1,0 +1,10 @@
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: BackupStorage
+metadata:
+  name: nfs-primary
+  namespace: backup-system
+spec:
+  type: nfs
+  nfs:
+    server: "<NFS_SERVER>"
+    path: "<NFS_EXPORT_PATH>"

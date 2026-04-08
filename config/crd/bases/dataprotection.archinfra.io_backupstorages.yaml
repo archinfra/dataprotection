@@ -11,6 +11,8 @@ spec:
     kind: BackupStorage
     listKind: BackupStorageList
     plural: backupstorages
+    shortNames:
+    - bst
     singular: backupstorage
   scope: Namespaced
   versions:
