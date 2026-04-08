@@ -143,7 +143,7 @@ prune_snapshots() {
   local retention="$2"
   local snapshots=()
 
-  mapfile -t snapshots < <(find "${snapshot_dir}" -maxdepth 1 -type f -name "*.sql.gz" -printf "%f\n" | sort -r)
+  mapfile -t snapshots < <(find "${snapshot_dir}" -maxdepth 1 -type f -name "*.sql.gz" -printf '%T@ %f\n' | sort -nr | awk '{print $2}')
   if (( ${#snapshots[@]} <= retention )); then
     return 0
   fi
@@ -260,6 +260,9 @@ resolve_snapshot_file() {
   local component_root="$1"
   local snapshot_dir="$2"
   local snapshot_name="${MYSQL_RESTORE_SNAPSHOT:-latest}"
+  local latest_fallback=""
+
+  latest_fallback="$(find "${snapshot_dir}" -maxdepth 1 -type f -name "*.sql.gz" -printf '%T@ %f\n' | sort -nr | awk 'NR==1 {print $2}')"
 
   if [[ "${snapshot_name}" == "latest" ]]; then
     if [[ -f "${component_root}/latest.txt" ]]; then
@@ -268,10 +271,10 @@ resolve_snapshot_file() {
         snapshot_name="${snapshot_name}.sql.gz"
       fi
       if [[ -z "${snapshot_name}" || ! -f "${snapshot_dir}/${snapshot_name}" ]]; then
-        snapshot_name="$(find "${snapshot_dir}" -maxdepth 1 -type f -name "*.sql.gz" -printf "%f\n" | sort -r | head -n 1)"
+        snapshot_name="${latest_fallback}"
       fi
     else
-      snapshot_name="$(find "${snapshot_dir}" -maxdepth 1 -type f -name "*.sql.gz" -printf "%f\n" | sort -r | head -n 1)"
+      snapshot_name="${latest_fallback}"
     fi
   fi
 

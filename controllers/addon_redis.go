@@ -120,7 +120,7 @@ prune_snapshots() {
   local retention="$2"
   local snapshots=()
 
-  mapfile -t snapshots < <(find "${snapshot_dir}" -maxdepth 1 -type f -name "*${REDIS_SNAPSHOT_SUFFIX}" -printf "%f\n" | sort -r)
+  mapfile -t snapshots < <(find "${snapshot_dir}" -maxdepth 1 -type f -name "*${REDIS_SNAPSHOT_SUFFIX}" -printf '%T@ %f\n' | sort -nr | awk '{print $2}')
   if (( ${#snapshots[@]} <= retention )); then
     return 0
   fi

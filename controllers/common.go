@@ -157,6 +157,11 @@ func createOrUpdateWithRetry(
 	})
 }
 
+func deleteInBackground(ctx context.Context, c client.Client, obj client.Object) error {
+	policy := metav1.DeletePropagationBackground
+	return c.Delete(ctx, obj, client.PropagationPolicy(policy))
+}
+
 func isTerminalBackupRun(phase dpv1alpha1.ResourcePhase) bool {
 	switch phase {
 	case dpv1alpha1.ResourcePhaseSucceeded, dpv1alpha1.ResourcePhaseFailed:

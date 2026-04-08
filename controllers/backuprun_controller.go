@@ -43,6 +43,10 @@ func (r *BackupRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	patchStatus := func(result ctrl.Result, reconcileErr error) (ctrl.Result, error) {
 		if err := r.Status().Patch(ctx, &run, client.MergeFrom(original)); err != nil {
+			if apierrors.IsNotFound(err) {
+				logger.V(1).Info("BackupRun disappeared before status patch completed")
+				return ctrl.Result{}, nil
+			}
 			logger.Error(err, "unable to patch BackupRun status")
 			return ctrl.Result{}, err
 		}
@@ -443,7 +447,7 @@ func (r *BackupRunReconciler) reconcileSnapshotSeries(
 			shouldDelete = true
 		}
 		if shouldDelete {
-			if err := r.Delete(ctx, snapshot); err != nil && !apierrors.IsNotFound(err) {
+			if err := deleteInBackground(ctx, r.Client, snapshot); err != nil && !apierrors.IsNotFound(err) {
 				return err
 			}
 			continue
@@ -529,7 +533,7 @@ func (r *BackupRunReconciler) pruneScheduledRunHistory(
 		if err := r.deleteOwnedJobsForRun(ctx, candidate); err != nil {
 			return err
 		}
-		if err := r.Delete(ctx, candidate); err != nil && !apierrors.IsNotFound(err) {
+		if err := deleteInBackground(ctx, r.Client, candidate); err != nil && !apierrors.IsNotFound(err) {
 			return err
 		}
 	}
@@ -547,7 +551,7 @@ func (r *BackupRunReconciler) deleteOwnedJobsForRun(ctx context.Context, run *dp
 		if !metav1.IsControlledBy(job, run) {
 			continue
 		}
-		if err := r.Delete(ctx, job); err != nil && !apierrors.IsNotFound(err) {
+		if err := deleteInBackground(ctx, r.Client, job); err != nil && !apierrors.IsNotFound(err) {
 			return err
 		}
 	}

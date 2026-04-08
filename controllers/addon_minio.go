@@ -76,7 +76,7 @@ prune_snapshots() {
   local retention="$2"
   local snapshots=()
 
-  mapfile -t snapshots < <(find "${snapshot_root}" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | sort -r)
+  mapfile -t snapshots < <(find "${snapshot_root}" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %f\n' | sort -nr | awk '{print $2}')
   if (( ${#snapshots[@]} <= retention )); then
     return 0
   fi
@@ -183,12 +183,18 @@ resolve_snapshot_dir() {
   local component_root="$1"
   local snapshot_root="$2"
   local snapshot_name="${MINIO_RESTORE_SNAPSHOT:-latest}"
+  local latest_fallback=""
+
+  latest_fallback="$(find "${snapshot_root}" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %f\n' | sort -nr | awk 'NR==1 {print $2}')"
 
   if [[ "${snapshot_name}" == "latest" ]]; then
     if [[ -f "${component_root}/latest.txt" ]]; then
       snapshot_name="$(cat "${component_root}/latest.txt")"
+      if [[ -z "${snapshot_name}" || ! -d "${snapshot_root}/${snapshot_name}" ]]; then
+        snapshot_name="${latest_fallback}"
+      fi
     else
-      snapshot_name="$(find "${snapshot_root}" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | sort -r | head -n 1)"
+      snapshot_name="${latest_fallback}"
     fi
   fi
 

@@ -21,6 +21,15 @@ func TestMySQLS3UploadScriptCreatesBucketWhenMissing(t *testing.T) {
 	}
 }
 
+func TestMySQLScriptsUseMtimeBasedSnapshotOrdering(t *testing.T) {
+	if !strings.Contains(mysqlBackupScript, `find "${snapshot_dir}" -maxdepth 1 -type f -name "*.sql.gz" -printf '%T@ %f\n' | sort -nr | awk '{print $2}'`) {
+		t.Fatalf("expected mysql backup pruning to sort snapshots by modification time")
+	}
+	if !strings.Contains(mysqlRestoreScript, `find "${snapshot_dir}" -maxdepth 1 -type f -name "*.sql.gz" -printf '%T@ %f\n' | sort -nr | awk 'NR==1 {print $2}'`) {
+		t.Fatalf("expected mysql restore latest fallback to use modification time ordering")
+	}
+}
+
 func TestMySQLBackupScriptRecordsStorageName(t *testing.T) {
 	if !strings.Contains(mysqlBackupScript, `echo "storage=${DP_STORAGE_NAME:-}"`) {
 		t.Fatalf("expected mysql backup metadata to record the storage name")
