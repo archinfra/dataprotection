@@ -1,92 +1,8 @@
 # Data Protection Operator
 
-`dataprotection` 是一个独立的数据保护 Operator 仓库。当前目标不是继续堆安装脚本，而是把“调度、执行、快照、恢复、保留策略”做成一套可维护的 Kubernetes 控制面。
+`dataprotection` 是一套面向 Kubernetes 的数据保护控制面。当前仓库的重点不是继续堆安装脚本，而是把调度、执行、快照、恢复、保留策略做成一套能维护、能扩展的 Operator。
 
-当前已经跑通的真实数据面是 MySQL，后续可以沿着同一套模型继续扩展到其他 driver 或 addon。
-
-## 当前架构
-
-当前架构决策已经明确：
-
-- 不再保留 `BackupRepository`
-- 存储后端统一使用 `BackupStorage`
-- 调度模型采用 `BackupPolicy -> CronJob -> BackupRun -> Job`
-- 恢复优先使用 `Snapshot`
-- 调度身份按 `BackupPolicy` 所在 namespace 自动下发，不再依赖 operator namespace 的 ServiceAccount
-
-这套模型借鉴了 Stash / KubeStash 的成熟思路，但实现是我们自己的控制器和 CRD。
-
-## 资源模型
-
-### `BackupSource`
-
-描述“谁需要被保护”。
-
-例如：
-
-- 一个 MySQL 实例
-- 一个 Redis 服务
-- 一个 MinIO 集群
-
-### `BackupStorage`
-
-描述“备份最终落到哪里”。
-
-当前支持：
-
-- `type: s3`
-- `type: nfs`
-
-### `BackupPolicy`
-
-描述长期策略：
-
-- 备份哪个 `BackupSource`
-- 写到哪些 `BackupStorage`
-- 用什么 cron 调度
-- 用什么保留策略
-
-控制器会为每个 storage 生成一个独立的 `CronJob`。
-
-### `BackupRun`
-
-描述一次具体备份执行。
-
-来源可以是：
-
-- 手工创建
-- `BackupPolicy` 调度触发
-
-控制器会为每个 storage 生成一个独立的 `Job`，并把结果写回 `status.storages[]`。
-
-### `Snapshot`
-
-描述一个可恢复的备份资产。
-
-它会记录：
-
-- 来自哪个 `BackupRun`
-- 属于哪个 `BackupStorage`
-- 对应的 `storagePath`
-- 实际的 snapshot 文件名
-
-### `RestoreRequest`
-
-描述一次恢复请求。
-
-推荐优先使用：
-
-- `spec.snapshotRef`
-
-这样恢复时可以直接拿到 storage identity、storage path 和 snapshot name，不再依赖手工拼路径。
-
-### `RetentionPolicy`
-
-描述可复用的保留策略。`BackupPolicy` 可以通过 `retentionPolicyRef` 引用它。
-
-## 调度模型为什么这样设计
-
-当前使用的是：
+当前调度模型已经稳定为：
 
 ```text
 BackupPolicy
@@ -97,358 +13,223 @@ BackupPolicy
           -> Snapshot
 ```
 
-而不是“controller 自己算时间然后直接创建 Job”。
+这套模型借鉴了 Stash / KubeStash 的成熟思路，但 CRD、controller、installer 都是我们自己实现和维护。
 
-这样做的原因：
+## 当前能力
 
-- `CronJob` 的定时、并发控制、错过窗口补偿是 Kubernetes 原生能力
-- `BackupRun` 把每次执行沉淀成 CRD 级历史，便于审计、追踪和告警
-- `Job` 只负责真正的数据动作，控制器不需要把执行态塞进内存
-- 后续要做暂停、补跑、重试、观测时，这个模型更稳定
-
-补充说明：
-
-- `CronJob.spec.concurrencyPolicy` 只约束 trigger Job
-- operator 现在会在 `trigger-backup-run` 阶段继续把 `Allow / Forbid / Replace` 落到 `BackupRun` 层
-- `Forbid` 会在已有活跃 `BackupRun` 时跳过本次调度
-- `Replace` 会先删除活跃 `BackupRun`，再创建新的调度执行
-
-## MySQL 当前能力
-
-当前 MySQL 是第一条已经跑通的数据面能力，代码在 [`controllers/mysql_runtime.go`](/C:/Users/admin/Desktop/release/dataprotection/controllers/mysql_runtime.go)。
-
-已经支持：
-
-- `mysqldump` 逻辑备份
-- `.sql.gz` 恢复
-- NFS 存储
-- S3 / MinIO 存储
-- 按库备份
-- 按表备份
-- `merge` 恢复
-- `wipe-all-user-databases` 恢复
-- `sha256` 校验
-- `latest.txt` 回退
-- retention 清理
-- 缺失 bucket 时自动创建 bucket
-
-## 快速开始
-
-### 1. 安装 operator
-
-```bash
-./data-protection-operator-amd64.run install -y
-```
-
-### 2. 创建认证 Secret
-
-```yaml
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: backup-system
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: mysql-runtime-auth
-  namespace: backup-system
-type: Opaque
-stringData:
-  password: "<MYSQL_ROOT_PASSWORD>"
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: minio-credentials
-  namespace: backup-system
-type: Opaque
-stringData:
-  access-key: "<S3_ACCESS_KEY>"
-  secret-key: "<S3_SECRET_KEY>"
-```
-
-### 3. 创建 `BackupSource`
-
-```yaml
-apiVersion: dataprotection.archinfra.io/v1alpha1
-kind: BackupSource
-metadata:
-  name: mysql-smoke
-  namespace: backup-system
-spec:
-  driver: mysql
-  endpoint:
-    host: mysql.default.svc.cluster.local
-    port: 3306
-    username: root
-    passwordFrom:
-      name: mysql-runtime-auth
-      key: password
-```
-
-### 4. 创建 S3 / MinIO 存储
-
-```yaml
-apiVersion: dataprotection.archinfra.io/v1alpha1
-kind: BackupStorage
-metadata:
-  name: minio-primary
-  namespace: backup-system
-spec:
-  type: s3
-  s3:
-    endpoint: http://minio.minio.svc.cluster.local:9000
-    bucket: data-protection
-    prefix: smoke
-    accessKeyFrom:
-      name: minio-credentials
-      key: access-key
-    secretKeyFrom:
-      name: minio-credentials
-      key: secret-key
-```
+| Driver / Addon | 备份 | 恢复 | 说明 |
+| --- | --- | --- | --- |
+| MySQL addon | 支持 | 支持 | `mysqldump`、NFS/S3、latest 回退、sha256、自动建 bucket |
+| Redis addon | 支持 | 暂不内建 | 支持单点和集群，集群会自动发现 master 节点并拉取 RDB |
+| MinIO addon | 支持 | 支持 | 把 MinIO 作为被保护源，镜像到 NFS 或 S3 存储 |
 
 说明：
 
-- 如果 bucket 不存在，MySQL 内建备份上传会自动创建
-- 如果 restore 时 bucket 或 path 不存在，会直接失败，避免误恢复
+- Redis 当前内建 addon 先把“稳定备份”跑通，恢复先保留给后续版本或自定义 execution。
+- MinIO 的 `includeVersions=true` 还没有内建实现，当前会直接拒绝，避免误以为已经备份了版本历史。
 
-### 5. 创建 NFS 存储
+## 架构原则
 
-也可以直接用 NFS：
+### 1. Core 只管控制面
 
-```yaml
-apiVersion: dataprotection.archinfra.io/v1alpha1
-kind: BackupStorage
-metadata:
-  name: nfs-primary
-  namespace: backup-system
-spec:
-  type: nfs
-  nfs:
-    server: 10.0.0.20
-    path: /exports/data-protection
-```
+core controller 负责：
 
-要求：
+- 解析 `BackupSource / BackupStorage / BackupPolicy / BackupRun / Snapshot / RestoreRequest`
+- 调度 `CronJob`
+- 创建执行 `Job`
+- 汇总状态
+- 维护快照对象
 
-- `server:path` 必须是可挂载的 NFS 导出目录
-- 该路径需要允许 Pod 写入
-- MySQL 运行时会在控制器生成的 `storagePath` 下写入快照
+### 2. 数据面尽量做成静态 addon
 
-### 6. 创建保留策略
+当前这版已经把 MySQL、Redis、MinIO 都接到了静态 addon 注册表里。这样后续继续加 MongoDB、RabbitMQ、Milvus 时，不需要再把逻辑直接塞进 reconcile 主流程。
 
-```yaml
-apiVersion: dataprotection.archinfra.io/v1alpha1
-kind: RetentionPolicy
-metadata:
-  name: mysql-daily-retention
-  namespace: backup-system
-spec:
-  successfulSnapshots:
-    last: 3
-  failedSnapshots:
-    last: 1
-```
+你可以从这些文件开始看：
 
-### 7. 创建定时策略
+- `controllers/addon_registry.go`
+- `controllers/addon_mysql.go`
+- `controllers/addon_redis.go`
+- `controllers/addon_minio.go`
 
-下面这个例子是每 3 分钟跑一次，适合联调：
+### 3. BackupStorage 统一后端
 
-```yaml
-apiVersion: dataprotection.archinfra.io/v1alpha1
-kind: BackupPolicy
-metadata:
-  name: mysql-smoke-daily
-  namespace: backup-system
-spec:
-  sourceRef:
-    name: mysql-smoke
-  storageRefs:
-    - name: minio-primary
-  schedule:
-    cron: "*/3 * * * *"
-    concurrencyPolicy: Forbid
-  retentionPolicyRef:
-    name: mysql-daily-retention
-  retention:
-    keepLast: 3
-```
+仓库不再保留 `BackupRepository`。后端统一使用：
 
-### 8. 手工触发一次备份
+- `BackupStorage` + `type: nfs`
+- `BackupStorage` + `type: s3`
 
-```yaml
-apiVersion: dataprotection.archinfra.io/v1alpha1
-kind: BackupRun
-metadata:
-  name: mysql-smoke-manual
-  namespace: backup-system
-spec:
-  policyRef:
-    name: mysql-smoke-daily
-  sourceRef:
-    name: mysql-smoke
-  storageRefs:
-    - name: minio-primary
-  reason: manual smoke backup
-```
+这样 source addon 只需要关心“如何把数据导出到标准目录”，不用再重复发明存储模型。
 
-### 9. 按快照恢复
+## CRD 模型
 
-备份成功后会自动生成 `Snapshot`，然后可以这样恢复：
+### `BackupSource`
 
-```yaml
-apiVersion: dataprotection.archinfra.io/v1alpha1
-kind: RestoreRequest
-metadata:
-  name: mysql-smoke-restore
-  namespace: backup-system
-spec:
-  sourceRef:
-    name: mysql-smoke
-  snapshotRef:
-    name: mysql-smoke-manual-minio-primary-snapshot
-  target:
-    mode: InPlace
-    driverConfig:
-      mysql:
-        restoreMode: merge
-```
+描述“谁需要被保护”。例如：
 
-## 调度身份和权限
+- 一个 MySQL 实例
+- 一个 Redis 单点或 Redis Cluster
+- 一个 MinIO 集群
 
-现在 `BackupPolicy` 的 CronJob 不再使用 operator namespace 的 SA。
+### `BackupStorage`
 
-每个 `BackupPolicy` 会自动在自己的 namespace 下生成：
+描述“备份最终落到哪里”。当前支持：
 
-- 一个 `ServiceAccount`
-- 一个最小权限 `Role`
-- 一个 `RoleBinding`
+- `nfs`
+- `s3`
 
-这个触发身份只负责两件事：
+### `BackupPolicy`
 
-- `get` 自己对应的 `BackupPolicy`
-- `create/list/delete` `BackupRun`
+描述长期策略：
 
-这意味着：
+- 备份哪个 `BackupSource`
+- 写到哪些 `BackupStorage`
+- 用什么 cron 调度
+- 用什么 retention 规则
 
-- `backup-system` 里的策略可以独立调度
-- 不需要手工在每个业务 namespace 补 SA
-- 权限范围比共享 controller SA 更小
+### `BackupRun`
 
-## 为什么会看到多个 Pod / 容器
+描述一次具体执行。它可以由两种方式产生：
 
-如果你配置的是“定时 + S3 / MinIO”，一次调度通常会看到两层资源：
+- 手工创建
+- `BackupPolicy` 调度触发
 
-### 第一层：触发 Pod
+### `Snapshot`
 
-这是 `CronJob` 自己拉起来的短命 Pod。
+描述一个可恢复的备份资产。恢复时优先使用 `snapshotRef`，而不是手工拼路径。
 
-它只有一个容器：
+### `RestoreRequest`
 
-- `backup-trigger`
+描述一次恢复请求。建议优先使用：
 
-作用：
+- `spec.snapshotRef`
 
-- 调用 `trigger-backup-run`
-- 创建一个新的 `BackupRun`
+### `RetentionPolicy`
 
-执行完成后它会很快 `Completed`。
+描述可复用保留策略，供多个 `BackupPolicy` 共享。
 
-### 第二层：真正的数据备份 Pod
+## 安装
 
-这是 `BackupRun` 控制器创建的实际数据面 Pod。
-
-如果后端是 S3 / MinIO，通常会有：
-
-- `s3-prefetch` init container
-- `mysql-backup` 主容器
-- `s3-upload` 辅助容器
-
-分别负责：
-
-- `s3-prefetch`: 先把远端已有 metadata / snapshot 拉到共享目录
-- `mysql-backup`: 执行 `mysqldump`，写本地快照和状态文件
-- `s3-upload`: 等待备份完成，必要时自动建 bucket，再把产物同步到对象存储
-
-所以你看到的：
-
-- 两个 `Completed` 的短命 Pod
-- 两个 `Running` 的备份 Pod
-
-这是正常现象，说明调度触发和真正数据执行是分层的。
-
-## Job 历史治理
-
-为了避免 `kubectl get job/pod -A` 被历史任务刷屏，当前默认行为已经收紧：
-
-- trigger `CronJob` 只保留 `1` 条成功历史和 `1` 条失败历史
-- 真正的备份/恢复 `Job` 默认带 `ttlSecondsAfterFinished=86400`
-
-如果你希望保留更久或更短，可以通过 `spec.execution.ttlSecondsAfterFinished` 覆盖。
-
-## 常用观察命令
+### 在线或离线安装
 
 ```bash
-kubectl get backupsource -n backup-system
-kubectl get backupstorage -n backup-system
-kubectl get backuppolicy -n backup-system
-kubectl get backuprun -n backup-system
-kubectl get snapshot -n backup-system
-kubectl get restorerequest -n backup-system
-kubectl get cronjob -n backup-system
-kubectl get job -n backup-system
-kubectl get pod -n backup-system
+./data-protection-operator-amd64.run install --image-pull-policy Always -y
 ```
 
-看某次备份详情：
+如果你想覆盖默认镜像，可以使用：
 
 ```bash
-kubectl get backuprun mysql-smoke-manual -n backup-system -o yaml
-kubectl describe job -n backup-system <job-name>
-kubectl describe pod -n backup-system <pod-name>
+./data-protection-operator-amd64.run install \
+  --operator-image <image> \
+  --mysql-runner-image <image> \
+  --redis-runner-image <image> \
+  --minio-runner-image <image> \
+  --s3-helper-image <image> \
+  -y
 ```
 
-看容器日志：
+### 安装后确认
 
 ```bash
-kubectl logs -n backup-system <pod-name> -c mysql-backup
-kubectl logs -n backup-system <pod-name> -c s3-upload
-kubectl logs -n backup-system <pod-name> -c s3-prefetch
+kubectl get pods -n data-protection-system
+kubectl get deploy -n data-protection-system data-protection-operator-controller-manager
+kubectl get crd | grep dataprotection.archinfra.io
 ```
 
-恢复场景看：
+## 快速开始
+
+完整样例见：
+
+- `docs/QUICKSTART.zh-CN.md`
+- `config/samples/quickstart/`
+
+最常用的基础样例：
+
+- `config/samples/quickstart/00-namespace-secrets.yaml`
+- `config/samples/quickstart/01-backupsource-mysql.yaml`
+- `config/samples/quickstart/02-backupstorage-minio.yaml`
+- `config/samples/quickstart/03-backupstorage-nfs.yaml`
+- `config/samples/quickstart/04-retentionpolicy.yaml`
+
+新增 addon 样例：
+
+- `config/samples/quickstart/11-backupsource-redis-standalone.yaml`
+- `config/samples/quickstart/12-backupsource-redis-cluster.yaml`
+- `config/samples/quickstart/13-backupsource-minio.yaml`
+- `config/samples/quickstart/14-backuppolicy-redis-standalone-every-5m.yaml`
+- `config/samples/quickstart/15-backuppolicy-redis-cluster-every-5m.yaml`
+- `config/samples/quickstart/16-backuppolicy-minio-every-10m.yaml`
+
+## kubectl shortName
+
+更新 CRD 后，可以直接这样看：
 
 ```bash
-kubectl logs -n backup-system <pod-name> -c mysql-restore
-kubectl logs -n backup-system <pod-name> -c s3-download
+kubectl get bsrc -A
+kubectl get bst -A
+kubectl get bp -A
+kubectl get br -A
+kubectl get snap -A
+kubectl get rr -A
+kubectl get rp -A
 ```
 
-## 本地开发
+组合查看：
 
 ```bash
-bash hack/bootstrap-dev-env.sh
-make fmt
-make generate
-make manifests
-make test
-make build
+kubectl get bsrc,bst,bp,br,snap,rr,rp -n backup-system
 ```
 
-## 当前边界
+## 手工测试建议
 
-当前已经是一套可运行的 alpha 控制面，但边界仍然明确：
+### MySQL
 
-- 已真实打通的数据面主要是 MySQL
-- 还没有 admission webhook
-- 还没有完整 metrics / events / verification controller
-- 其他 driver 目前仍以模型位和扩展位为主
+先跑：
 
-## 相关文档
+1. `BackupSource`
+2. `BackupStorage`
+3. `RetentionPolicy`
+4. `BackupPolicy`
+5. `BackupRun`
+6. `RestoreRequest`
 
-- [开发说明](/C:/Users/admin/Desktop/release/dataprotection/docs/DEVELOPMENT.zh-CN.md)
-- [项目状态](/C:/Users/admin/Desktop/release/dataprotection/docs/PROJECT-STATUS.zh-CN.md)
-- [调度模型 ADR](/C:/Users/admin/Desktop/release/dataprotection/docs/ADR-2026-04-08-scheduling-model.zh-CN.md)
-- [Stash 借鉴说明](/C:/Users/admin/Desktop/release/dataprotection/docs/STASH-INSIGHTS.zh-CN.md)
-- [手工测试方案](/C:/Users/admin/Desktop/release/dataprotection/docs/MANUAL-TEST-PLAN.zh-CN.md)
+### Redis 单点
+
+先验证：
+
+1. 手工 `BackupRun`
+2. 定时 `BackupPolicy`
+3. 切换到 NFS / S3 两种后端
+
+### Redis Cluster
+
+重点验证：
+
+1. 能否从 seed endpoint 自动发现 master 节点
+2. 是否每个 master 都生成了 RDB
+3. S3/NFS 上快照是否完整
+
+### MinIO
+
+重点验证：
+
+1. 指定 bucket + prefix 是否按预期镜像
+2. 留空 bucket 时是否会自动枚举所有 bucket
+3. 从 NFS/S3 恢复到源 MinIO 时，缺失 bucket 是否会自动创建
+
+## 已知边界
+
+- Redis 内建 addon 当前只支持备份，不内建 restore。
+- MinIO 当前不支持版本化对象历史备份。
+- `BackupSource Ready` 目前仍主要是静态配置通过，不等于真实连通性完全探测。
+
+## 开发入口
+
+如果你要继续扩展 addon，建议按这个顺序看代码：
+
+1. `controllers/addon_registry.go`
+2. `controllers/runtime_helpers.go`
+3. `controllers/addon_mysql.go`
+4. `controllers/addon_redis.go`
+5. `controllers/addon_minio.go`
+
+这几层已经把“控制面”和“数据面 addon”基本拆开了，后面继续加 driver 时会轻很多。

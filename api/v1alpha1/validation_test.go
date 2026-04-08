@@ -28,3 +28,21 @@ func TestValidateMySQLDriverConfigAcceptsSupportedRestoreModes(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateRedisDriverConfigAcceptsRDBMode(t *testing.T) {
+	if err := validateRedisDriverConfig(&RedisDriverConfig{Mode: "rdb"}); err != nil {
+		t.Fatalf("expected redis rdb mode to be accepted: %v", err)
+	}
+}
+
+func TestValidateRedisDriverConfigRejectsUnsupportedMode(t *testing.T) {
+	if err := validateRedisDriverConfig(&RedisDriverConfig{Mode: "aof"}); err == nil {
+		t.Fatalf("expected unsupported redis mode to be rejected")
+	}
+}
+
+func TestValidateMinIODriverConfigRejectsVersionedBackup(t *testing.T) {
+	if err := validateMinIODriverConfig(&MinIODriverConfig{IncludeVersions: true}); err == nil {
+		t.Fatalf("expected includeVersions=true to be rejected until the built-in addon supports it")
+	}
+}

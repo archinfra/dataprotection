@@ -11,6 +11,8 @@ import (
 const (
 	defaultPlaceholderRunnerImageValue = "busybox:1.36"
 	defaultMySQLRunnerImageValue       = "mysql:8.0.45"
+	defaultRedisRunnerImageValue       = "redis:7.2.7-alpine"
+	defaultMinIORunnerImageValue       = "minio/mc:latest"
 	defaultS3HelperImageValue          = "minio/mc:latest"
 	defaultControllerImageValue        = "sealos.hub:5000/kube4/dataprotection-operator:latest"
 	defaultJobTTLSecondsValue          = int32(86400)
@@ -24,6 +26,14 @@ func defaultPlaceholderRunnerImage() string {
 
 func defaultMySQLRunnerImage() string {
 	return envOrDefault("DP_DEFAULT_MYSQL_RUNNER_IMAGE", defaultMySQLRunnerImageValue)
+}
+
+func defaultRedisRunnerImage() string {
+	return envOrDefault("DP_DEFAULT_REDIS_RUNNER_IMAGE", defaultRedisRunnerImageValue)
+}
+
+func defaultMinIORunnerImage() string {
+	return envOrDefault("DP_DEFAULT_MINIO_RUNNER_IMAGE", defaultMinIORunnerImageValue)
 }
 
 func defaultS3HelperImage() string {

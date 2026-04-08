@@ -1,0 +1,17 @@
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: BackupPolicy
+metadata:
+  name: minio-source-every-10m
+  namespace: backup-system
+spec:
+  sourceRef:
+    name: minio-source
+  storageRefs:
+    - name: nfs-primary
+  schedule:
+    cron: "*/10 * * * *"
+    concurrencyPolicy: Forbid
+  retentionPolicyRef:
+    name: mysql-daily-retention
+  retention:
+    keepLast: 3

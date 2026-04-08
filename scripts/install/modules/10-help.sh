@@ -16,6 +16,8 @@ Options:
   --registry-password <password>    Optional docker registry password
   --operator-image <image>          Override controller image
   --mysql-runner-image <image>      Override default MySQL runner image
+  --redis-runner-image <image>      Override default Redis runner image
+  --minio-runner-image <image>      Override default MinIO runner image
   --s3-helper-image <image>         Override default S3 helper image
   --placeholder-runner-image <img>  Override default placeholder runner image
   --image-pull-policy <policy>      Always|IfNotPresent|Never, default: ${IMAGE_PULL_POLICY}
@@ -30,4 +32,3 @@ Examples:
   ./$(basename "$0") uninstall --delete-crds -y
 EOF
 }
-

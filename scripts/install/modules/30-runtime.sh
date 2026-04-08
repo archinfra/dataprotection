@@ -118,6 +118,22 @@ mysql_runner_image_ref() {
   default_image_ref "dataprotection-mysql"
 }
 
+redis_runner_image_ref() {
+  if [[ -n "${REDIS_RUNNER_IMAGE_OVERRIDE}" ]]; then
+    printf '%s' "${REDIS_RUNNER_IMAGE_OVERRIDE}"
+    return
+  fi
+  default_image_ref "dataprotection-redis"
+}
+
+minio_runner_image_ref() {
+  if [[ -n "${MINIO_RUNNER_IMAGE_OVERRIDE}" ]]; then
+    printf '%s' "${MINIO_RUNNER_IMAGE_OVERRIDE}"
+    return
+  fi
+  default_image_ref "dataprotection-minio-mc"
+}
+
 s3_helper_image_ref() {
   if [[ -n "${S3_HELPER_IMAGE_OVERRIDE}" ]]; then
     printf '%s' "${S3_HELPER_IMAGE_OVERRIDE}"

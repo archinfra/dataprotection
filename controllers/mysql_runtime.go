@@ -390,6 +390,7 @@ ensure_bucket() {
 
 verify_remote_upload() {
   local snapshot_name=""
+  local snapshot_kind="${BACKUP_SNAPSHOT_KIND:-file}"
 
   mc_cmd ls "backup/${remote_path}" >/dev/null 2>&1 || {
     echo "[ERROR] unable to list uploaded backup path: ${remote_path}"
@@ -408,10 +409,17 @@ verify_remote_upload() {
       exit 1
     }
 
-    mc_cmd stat "backup/${remote_path}/snapshots/${snapshot_name}" >/dev/null 2>&1 || {
-      echo "[ERROR] uploaded snapshot ${snapshot_name} not found at ${remote_path}/snapshots"
-      exit 1
-    }
+    if [ "${snapshot_kind}" = "directory" ]; then
+      mc_cmd ls "backup/${remote_path}/snapshots/${snapshot_name}" >/dev/null 2>&1 || {
+        echo "[ERROR] uploaded snapshot directory ${snapshot_name} not found at ${remote_path}/snapshots"
+        exit 1
+      }
+    else
+      mc_cmd stat "backup/${remote_path}/snapshots/${snapshot_name}" >/dev/null 2>&1 || {
+        echo "[ERROR] uploaded snapshot ${snapshot_name} not found at ${remote_path}/snapshots"
+        exit 1
+      }
+    fi
   fi
 }
 

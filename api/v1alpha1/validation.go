@@ -25,6 +25,12 @@ func (s *BackupSourceSpec) ValidateBasic() error {
 	if err := validateMySQLDriverConfig(s.DriverConfig.MySQL); err != nil {
 		return err
 	}
+	if err := validateRedisDriverConfig(s.DriverConfig.Redis); err != nil {
+		return err
+	}
+	if err := validateMinIODriverConfig(s.DriverConfig.MinIO); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -77,6 +83,12 @@ func (s *BackupPolicySpec) ValidateBasic() error {
 	if err := validateMySQLDriverConfig(s.DriverConfig.MySQL); err != nil {
 		return err
 	}
+	if err := validateRedisDriverConfig(s.DriverConfig.Redis); err != nil {
+		return err
+	}
+	if err := validateMinIODriverConfig(s.DriverConfig.MinIO); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -104,6 +116,12 @@ func (s *BackupRunSpec) ValidateBasic() error {
 	if err := validateMySQLDriverConfig(s.DriverConfig.MySQL); err != nil {
 		return err
 	}
+	if err := validateRedisDriverConfig(s.DriverConfig.Redis); err != nil {
+		return err
+	}
+	if err := validateMinIODriverConfig(s.DriverConfig.MinIO); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -128,6 +146,12 @@ func (s *RestoreRequestSpec) ValidateBasic() error {
 		}
 	}
 	if err := validateMySQLDriverConfig(s.Target.DriverConfig.MySQL); err != nil {
+		return err
+	}
+	if err := validateRedisDriverConfig(s.Target.DriverConfig.Redis); err != nil {
+		return err
+	}
+	if err := validateMinIODriverConfig(s.Target.DriverConfig.MinIO); err != nil {
 		return err
 	}
 	return nil
@@ -191,6 +215,30 @@ func validateMySQLDriverConfig(config *MySQLDriverConfig) error {
 		default:
 			return fmt.Errorf("unsupported mysql restoreMode %q", config.RestoreMode)
 		}
+	}
+	return nil
+}
+
+func validateRedisDriverConfig(config *RedisDriverConfig) error {
+	if config == nil {
+		return nil
+	}
+	if mode := strings.TrimSpace(config.Mode); mode != "" {
+		switch mode {
+		case "rdb":
+		default:
+			return fmt.Errorf("unsupported redis mode %q", config.Mode)
+		}
+	}
+	return nil
+}
+
+func validateMinIODriverConfig(config *MinIODriverConfig) error {
+	if config == nil {
+		return nil
+	}
+	if config.IncludeVersions {
+		return fmt.Errorf("built-in minio addon does not support includeVersions=true yet")
 	}
 	return nil
 }

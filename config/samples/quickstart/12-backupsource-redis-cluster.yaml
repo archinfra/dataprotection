@@ -1,0 +1,18 @@
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: BackupSource
+metadata:
+  name: redis-cluster
+  namespace: backup-system
+spec:
+  driver: redis
+  endpoint:
+    # Point to any reachable seed service or headless service for the cluster.
+    host: redis-cluster.redis.svc.cluster.local
+    port: 6379
+    passwordFrom:
+      name: redis-runtime-auth
+      key: password
+  driverConfig:
+    redis:
+      # The addon will auto-discover master nodes from this seed endpoint.
+      mode: rdb

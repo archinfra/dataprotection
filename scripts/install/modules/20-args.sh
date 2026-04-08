@@ -42,6 +42,16 @@ parse_args() {
         MYSQL_RUNNER_IMAGE_OVERRIDE="$2"
         shift 2
         ;;
+      --redis-runner-image)
+        [[ $# -ge 2 ]] || die "Missing value for $1"
+        REDIS_RUNNER_IMAGE_OVERRIDE="$2"
+        shift 2
+        ;;
+      --minio-runner-image)
+        [[ $# -ge 2 ]] || die "Missing value for $1"
+        MINIO_RUNNER_IMAGE_OVERRIDE="$2"
+        shift 2
+        ;;
       --s3-helper-image)
         [[ $# -ge 2 ]] || die "Missing value for $1"
         S3_HELPER_IMAGE_OVERRIDE="$2"

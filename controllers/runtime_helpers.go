@@ -376,8 +376,18 @@ func buildBackupRunJob(
 		execution = policy.Spec.Execution
 		driverConfig = effectiveDriverConfig(policy.Spec.DriverConfig, run.Spec.DriverConfig)
 	}
-	if useBuiltInMySQLRuntime(source.Spec.Driver, execution) {
-		return buildBuiltInMySQLBackupRunJob(run, policy, source, storage, storagePath, snapshot, keepLast)
+	if addon := resolveBuiltInAddon(source.Spec.Driver, execution); addon != nil {
+		return addon.BuildBackupJob(addonBackupJobRequest{
+			Run:          run,
+			Policy:       policy,
+			Source:       source,
+			Storage:      storage,
+			StoragePath:  storagePath,
+			Snapshot:     snapshot,
+			KeepLast:     keepLast,
+			Execution:    execution,
+			DriverConfig: driverConfig,
+		})
 	}
 	execution = defaultExecutionTemplate(execution)
 	name := dpv1alpha1.BuildJobName(run.Name, storage.Name)
@@ -411,8 +421,18 @@ func buildRestoreJob(
 	execution dpv1alpha1.ExecutionTemplateSpec,
 	snapshot string,
 ) (*batchv1.Job, error) {
-	if useBuiltInMySQLRuntime(source.Spec.Driver, execution) {
-		return buildBuiltInMySQLRestoreJob(restore, backupRun, source, storage, storagePath, execution, snapshot)
+	driverConfig := effectiveDriverConfig(source.Spec.DriverConfig, restore.Spec.Target.DriverConfig)
+	if addon := resolveBuiltInAddon(source.Spec.Driver, execution); addon != nil {
+		return addon.BuildRestoreJob(addonRestoreJobRequest{
+			Restore:      restore,
+			BackupRun:    backupRun,
+			Source:       source,
+			Storage:      storage,
+			StoragePath:  storagePath,
+			Execution:    execution,
+			DriverConfig: driverConfig,
+			Snapshot:     snapshot,
+		})
 	}
 	execution = defaultExecutionTemplate(execution)
 	name := dpv1alpha1.BuildJobName(restore.Name, "restore")

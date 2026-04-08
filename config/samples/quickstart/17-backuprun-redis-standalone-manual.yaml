@@ -1,0 +1,11 @@
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: BackupRun
+metadata:
+  name: redis-standalone-manual
+  namespace: backup-system
+spec:
+  sourceRef:
+    name: redis-standalone
+  storageRefs:
+    - name: minio-primary
+  reason: "manual smoke backup for redis standalone"
