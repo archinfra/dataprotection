@@ -11,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	dpv1alpha1 "github.com/archinfra/dataprotection/api/v1alpha1"
 )
@@ -75,6 +76,9 @@ func runTriggerBackupRun(args []string) error {
 			StorageRefs: []corev1.LocalObjectReference{{Name: storageName}},
 			Reason:      fmt.Sprintf("scheduled by policy/%s", policy.Name),
 		},
+	}
+	if err := controllerutil.SetControllerReference(policy, run, scheme); err != nil {
+		return err
 	}
 
 	return k8sClient.Create(ctx, run)

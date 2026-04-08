@@ -9,8 +9,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	dpv1alpha1 "github.com/archinfra/dataprotection/api/v1alpha1"
 )
@@ -118,4 +120,46 @@ func sortSnapshotsNewestFirst(items []*dpv1alpha1.Snapshot) {
 		}
 		return left.After(right)
 	})
+}
+
+func backupRunSortTime(run *dpv1alpha1.BackupRun) time.Time {
+	if run.Status.CompletedAt != nil {
+		return run.Status.CompletedAt.Time
+	}
+	if run.Status.StartedAt != nil {
+		return run.Status.StartedAt.Time
+	}
+	return run.CreationTimestamp.Time
+}
+
+func sortBackupRunsNewestFirst(items []*dpv1alpha1.BackupRun) {
+	sort.SliceStable(items, func(i, j int) bool {
+		left := backupRunSortTime(items[i])
+		right := backupRunSortTime(items[j])
+		if left.Equal(right) {
+			return items[i].Name > items[j].Name
+		}
+		return left.After(right)
+	})
+}
+
+func createOrUpdateWithRetry(
+	ctx context.Context,
+	c client.Client,
+	obj client.Object,
+	mutateFn controllerutil.MutateFn,
+) error {
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		_, err := controllerutil.CreateOrUpdate(ctx, c, obj, mutateFn)
+		return err
+	})
+}
+
+func isTerminalBackupRun(phase dpv1alpha1.ResourcePhase) bool {
+	switch phase {
+	case dpv1alpha1.ResourcePhaseSucceeded, dpv1alpha1.ResourcePhaseFailed:
+		return true
+	default:
+		return false
+	}
 }

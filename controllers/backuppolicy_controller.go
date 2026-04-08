@@ -159,7 +159,7 @@ func (r *BackupPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		desiredCronJobNames[desired.Name] = struct{}{}
 
 		current := &batchv1.CronJob{ObjectMeta: metav1.ObjectMeta{Name: desired.Name, Namespace: desired.Namespace}}
-		if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, current, func() error {
+		if err := createOrUpdateWithRetry(ctx, r.Client, current, func() error {
 			current.Labels = mergeStringMaps(current.Labels, desired.Labels)
 			current.Annotations = mergeStringMaps(current.Annotations, desired.Annotations)
 			current.Spec = desired.Spec

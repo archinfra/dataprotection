@@ -59,7 +59,7 @@ func ensureTriggerAccess(
 			Namespace: policy.Namespace,
 		},
 	}
-	if _, err := controllerutil.CreateOrUpdate(ctx, c, serviceAccount, func() error {
+	if err := createOrUpdateWithRetry(ctx, c, serviceAccount, func() error {
 		serviceAccount.Labels = mergeStringMaps(serviceAccount.Labels, labels)
 		return controllerutil.SetControllerReference(policy, serviceAccount, scheme)
 	}); err != nil {
@@ -72,7 +72,7 @@ func ensureTriggerAccess(
 			Namespace: policy.Namespace,
 		},
 	}
-	if _, err := controllerutil.CreateOrUpdate(ctx, c, role, func() error {
+	if err := createOrUpdateWithRetry(ctx, c, role, func() error {
 		role.Labels = mergeStringMaps(role.Labels, labels)
 		role.Rules = buildTriggerPolicyRules(policy.Name)
 		return controllerutil.SetControllerReference(policy, role, scheme)
@@ -86,7 +86,7 @@ func ensureTriggerAccess(
 			Namespace: policy.Namespace,
 		},
 	}
-	if _, err := controllerutil.CreateOrUpdate(ctx, c, roleBinding, func() error {
+	if err := createOrUpdateWithRetry(ctx, c, roleBinding, func() error {
 		roleBinding.Labels = mergeStringMaps(roleBinding.Labels, labels)
 		roleBinding.RoleRef = rbacv1.RoleRef{
 			APIGroup: rbacv1.GroupName,

@@ -100,6 +100,7 @@ func (r *BackupRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	keepLast := retentionValue(dpv1alpha1.RetentionRule{})
+	failedKeepLast := int32(0)
 	if resolved.Policy != nil {
 		resolvedKeepLast, _, err := resolveKeepLastRetention(ctx, r.Client, run.Namespace, resolved.Policy.Spec.Retention, localRefName(resolved.Policy.Spec.RetentionPolicyRef))
 		if err != nil {
@@ -125,6 +126,30 @@ func (r *BackupRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			}
 		}
 		keepLast = resolvedKeepLast
+		resolvedFailedKeepLast, _, err := resolveFailedRetention(ctx, r.Client, run.Namespace, localRefName(resolved.Policy.Spec.RetentionPolicyRef))
+		if err != nil {
+			run.Status.JobNames = nil
+			run.Status.Storages = nil
+			switch {
+			case isDependencyMissing(err):
+				run.Status.Phase = dpv1alpha1.ResourcePhasePending
+				run.Status.CompletedAt = nil
+				run.Status.Message = err.Error()
+				markCondition(&run.Status.Conditions, "Accepted", metav1.ConditionFalse, "DependencyNotReady", err.Error(), run.Generation)
+				markCondition(&run.Status.Conditions, "Completed", metav1.ConditionFalse, "DependencyNotReady", phaseMessage(run.Status.Phase), run.Generation)
+				return patchStatus(requeueSoon(), nil)
+			case isPermanentDependencyError(err):
+				run.Status.Phase = dpv1alpha1.ResourcePhaseFailed
+				run.Status.CompletedAt = nowTime()
+				run.Status.Message = err.Error()
+				markCondition(&run.Status.Conditions, "Accepted", metav1.ConditionFalse, "InvalidRetentionPolicy", err.Error(), run.Generation)
+				markCondition(&run.Status.Conditions, "Completed", metav1.ConditionFalse, "InvalidRetentionPolicy", err.Error(), run.Generation)
+				return patchStatus(ctrl.Result{}, nil)
+			default:
+				return ctrl.Result{}, err
+			}
+		}
+		failedKeepLast = resolvedFailedKeepLast
 	}
 
 	jobNames := make([]string, 0, len(resolved.Storages))
@@ -227,11 +252,19 @@ func (r *BackupRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	case dpv1alpha1.ResourcePhaseSucceeded:
 		run.Status.Message = "all storage backup jobs completed successfully"
 		markCondition(&run.Status.Conditions, "Completed", metav1.ConditionTrue, "AllJobsSucceeded", "all storage backup jobs completed successfully", run.Generation)
-		return patchStatus(ctrl.Result{}, nil)
+		result, err := patchStatus(ctrl.Result{}, nil)
+		if err != nil {
+			return result, err
+		}
+		return result, r.pruneScheduledRunHistory(ctx, &run, keepLast, failedKeepLast)
 	case dpv1alpha1.ResourcePhaseFailed:
 		run.Status.Message = "one or more storage backup jobs failed"
 		markCondition(&run.Status.Conditions, "Completed", metav1.ConditionFalse, "JobFailed", "one or more storage backup jobs failed", run.Generation)
-		return patchStatus(ctrl.Result{}, nil)
+		result, err := patchStatus(ctrl.Result{}, nil)
+		if err != nil {
+			return result, err
+		}
+		return result, r.pruneScheduledRunHistory(ctx, &run, keepLast, failedKeepLast)
 	case dpv1alpha1.ResourcePhaseRunning:
 		run.Status.Message = "backup jobs are still running"
 		markCondition(&run.Status.Conditions, "Completed", metav1.ConditionFalse, "Running", "backup jobs are still running", run.Generation)
@@ -414,6 +447,77 @@ func (r *BackupRunReconciler) reconcileSnapshotSeries(
 			snapshot.Status.Message = phaseMessage(snapshot.Status.Phase)
 		}
 		if err := r.Status().Patch(ctx, snapshot, client.MergeFrom(statusOriginal)); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (r *BackupRunReconciler) pruneScheduledRunHistory(
+	ctx context.Context,
+	run *dpv1alpha1.BackupRun,
+	successKeepLast int32,
+	failedKeepLast int32,
+) error {
+	if run.Labels["dataprotection.archinfra.io/triggered-by"] != "cronjob" {
+		return nil
+	}
+	policyName := strings.TrimSpace(run.Labels["dataprotection.archinfra.io/policy-name"])
+	storageName := strings.TrimSpace(run.Labels["dataprotection.archinfra.io/storage-name"])
+	if policyName == "" || storageName == "" {
+		return nil
+	}
+
+	var runList dpv1alpha1.BackupRunList
+	if err := r.List(ctx, &runList,
+		client.InNamespace(run.Namespace),
+		client.MatchingLabels{
+			"dataprotection.archinfra.io/triggered-by": "cronjob",
+			"dataprotection.archinfra.io/policy-name":  policyName,
+			"dataprotection.archinfra.io/storage-name": storageName,
+		},
+	); err != nil {
+		return err
+	}
+
+	series := make([]*dpv1alpha1.BackupRun, 0, len(runList.Items))
+	for i := range runList.Items {
+		candidate := &runList.Items[i]
+		if candidate.DeletionTimestamp != nil {
+			continue
+		}
+		if !isTerminalBackupRun(candidate.Status.Phase) {
+			continue
+		}
+		series = append(series, candidate)
+	}
+	if len(series) == 0 {
+		return nil
+	}
+
+	sortBackupRunsNewestFirst(series)
+
+	successCount := int32(0)
+	failedCount := int32(0)
+	for _, candidate := range series {
+		shouldDelete := false
+		switch candidate.Status.Phase {
+		case dpv1alpha1.ResourcePhaseSucceeded:
+			successCount++
+			shouldDelete = successKeepLast > 0 && successCount > successKeepLast
+		case dpv1alpha1.ResourcePhaseFailed:
+			if failedKeepLast <= 0 {
+				shouldDelete = true
+			} else {
+				failedCount++
+				shouldDelete = failedCount > failedKeepLast
+			}
+		}
+		if !shouldDelete {
+			continue
+		}
+		if err := r.Delete(ctx, candidate); err != nil && !apierrors.IsNotFound(err) {
 			return err
 		}
 	}

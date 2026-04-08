@@ -510,6 +510,101 @@ func TestBackupRunReconcilePrunesOldSnapshotsAndMarksLatest(t *testing.T) {
 	}
 }
 
+func TestBackupRunReconcilePrunesScheduledRunHistory(t *testing.T) {
+	scheme := newTestScheme(t)
+	ctx := context.Background()
+
+	source := newMySQLSource("backup-system", "mysql-prod")
+	storage := newS3Storage("backup-system", "minio-primary", "smoke")
+	policy := &dpv1alpha1.BackupPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "mysql-daily", Namespace: "backup-system", UID: types.UID("policy-history-uid")},
+		Spec: dpv1alpha1.BackupPolicySpec{
+			SourceRef:          corev1.LocalObjectReference{Name: source.Name},
+			StorageRefs:        []corev1.LocalObjectReference{{Name: storage.Name}},
+			Schedule:           dpv1alpha1.BackupScheduleSpec{Cron: "*/5 * * * *"},
+			Retention:          dpv1alpha1.RetentionRule{KeepLast: 2},
+			RetentionPolicyRef: &corev1.LocalObjectReference{Name: "mysql-retention"},
+		},
+	}
+	retentionPolicy := &dpv1alpha1.RetentionPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "mysql-retention", Namespace: "backup-system"},
+		Spec: dpv1alpha1.RetentionPolicySpec{
+			SuccessfulSnapshots: dpv1alpha1.SnapshotRetentionRule{Last: 2},
+			FailedSnapshots:     dpv1alpha1.SnapshotRetentionRule{Last: 1},
+		},
+	}
+	currentRun := &dpv1alpha1.BackupRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "mysql-daily-scheduled-new",
+			Namespace: "backup-system",
+			UID:       types.UID("run-history-current"),
+			Labels: map[string]string{
+				"dataprotection.archinfra.io/triggered-by": "cronjob",
+				"dataprotection.archinfra.io/policy-name":  dpv1alpha1.BuildLabelValue(policy.Name),
+				"dataprotection.archinfra.io/storage-name": dpv1alpha1.BuildLabelValue(storage.Name),
+			},
+		},
+		Spec: dpv1alpha1.BackupRunSpec{
+			PolicyRef:   &corev1.LocalObjectReference{Name: policy.Name},
+			SourceRef:   corev1.LocalObjectReference{Name: source.Name},
+			StorageRefs: []corev1.LocalObjectReference{{Name: storage.Name}},
+			Reason:      "scheduled by policy/mysql-daily",
+		},
+	}
+	oldSuccessA := newScheduledTerminalRun("backup-system", "mysql-daily-scheduled-old-a", policy.Name, storage.Name, dpv1alpha1.ResourcePhaseSucceeded, time.Now().Add(-3*time.Hour))
+	oldSuccessB := newScheduledTerminalRun("backup-system", "mysql-daily-scheduled-old-b", policy.Name, storage.Name, dpv1alpha1.ResourcePhaseSucceeded, time.Now().Add(-2*time.Hour))
+	oldFailed := newScheduledTerminalRun("backup-system", "mysql-daily-scheduled-old-failed", policy.Name, storage.Name, dpv1alpha1.ResourcePhaseFailed, time.Now().Add(-1*time.Hour))
+
+	fakeClient := newFakeClient(t, scheme, source, storage, policy, retentionPolicy, currentRun, oldSuccessA, oldSuccessB, oldFailed)
+	reconciler := &BackupRunReconciler{Client: fakeClient, Scheme: scheme}
+
+	req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(currentRun)}
+	if _, err := reconciler.Reconcile(ctx, req); err != nil {
+		t.Fatalf("first reconcile failed: %v", err)
+	}
+
+	jobName := dpv1alpha1.BuildJobName(currentRun.Name, storage.Name)
+	var job batchv1.Job
+	if err := fakeClient.Get(ctx, types.NamespacedName{Namespace: currentRun.Namespace, Name: jobName}, &job); err != nil {
+		t.Fatalf("expected job %s: %v", jobName, err)
+	}
+	job.Status.Succeeded = 1
+	job.Status.Conditions = []batchv1.JobCondition{{
+		Type:               batchv1.JobComplete,
+		Status:             corev1.ConditionTrue,
+		LastTransitionTime: metav1.Now(),
+	}}
+	if err := fakeClient.Status().Update(ctx, &job); err != nil {
+		t.Fatalf("update job status %s: %v", jobName, err)
+	}
+
+	if _, err := reconciler.Reconcile(ctx, req); err != nil {
+		t.Fatalf("second reconcile failed: %v", err)
+	}
+
+	var runs dpv1alpha1.BackupRunList
+	if err := fakeClient.List(ctx, &runs, client.InNamespace(currentRun.Namespace)); err != nil {
+		t.Fatalf("list backupruns: %v", err)
+	}
+
+	runNames := map[string]struct{}{}
+	for _, item := range runs.Items {
+		runNames[item.Name] = struct{}{}
+	}
+	if _, ok := runNames[currentRun.Name]; !ok {
+		t.Fatalf("expected current scheduled run to remain")
+	}
+	if _, ok := runNames[oldSuccessB.Name]; !ok {
+		t.Fatalf("expected newest historical successful run to remain")
+	}
+	if _, ok := runNames[oldFailed.Name]; !ok {
+		t.Fatalf("expected newest historical failed run to remain")
+	}
+	if _, ok := runNames[oldSuccessA.Name]; ok {
+		t.Fatalf("did not expect oldest successful scheduled run to remain")
+	}
+}
+
 func newMySQLSource(namespace, name string) *dpv1alpha1.BackupSource {
 	return &dpv1alpha1.BackupSource{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, UID: types.UID(name + "-uid")},
@@ -519,6 +614,33 @@ func newMySQLSource(namespace, name string) *dpv1alpha1.BackupSource {
 				Host: "mysql.default.svc",
 				Port: 3306,
 			},
+		},
+	}
+}
+
+func newScheduledTerminalRun(namespace, name, policyName, storageName string, phase dpv1alpha1.ResourcePhase, completedAt time.Time) *dpv1alpha1.BackupRun {
+	completed := metav1.NewTime(completedAt)
+	started := metav1.NewTime(completedAt.Add(-1 * time.Minute))
+	return &dpv1alpha1.BackupRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels: map[string]string{
+				"dataprotection.archinfra.io/triggered-by": "cronjob",
+				"dataprotection.archinfra.io/policy-name":  dpv1alpha1.BuildLabelValue(policyName),
+				"dataprotection.archinfra.io/storage-name": dpv1alpha1.BuildLabelValue(storageName),
+			},
+		},
+		Spec: dpv1alpha1.BackupRunSpec{
+			PolicyRef:   &corev1.LocalObjectReference{Name: policyName},
+			SourceRef:   corev1.LocalObjectReference{Name: "mysql-prod"},
+			StorageRefs: []corev1.LocalObjectReference{{Name: storageName}},
+			Reason:      "scheduled by policy/" + policyName,
+		},
+		Status: dpv1alpha1.BackupRunStatus{
+			Phase:       phase,
+			StartedAt:   &started,
+			CompletedAt: &completed,
 		},
 	}
 }
