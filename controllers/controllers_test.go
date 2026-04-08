@@ -6,6 +6,7 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -44,11 +45,38 @@ func TestBackupPolicyReconcileCreatesCronJobsPerStorage(t *testing.T) {
 		t.Fatalf("reconcile failed: %v", err)
 	}
 
+	triggerServiceAccount := triggerServiceAccountName(policy.Name)
+	var serviceAccount corev1.ServiceAccount
+	if err := fakeClient.Get(ctx, types.NamespacedName{Namespace: policy.Namespace, Name: triggerServiceAccount}, &serviceAccount); err != nil {
+		t.Fatalf("expected trigger service account %s: %v", triggerServiceAccount, err)
+	}
+
+	roleName := triggerRoleName(policy.Name)
+	var role rbacv1.Role
+	if err := fakeClient.Get(ctx, types.NamespacedName{Namespace: policy.Namespace, Name: roleName}, &role); err != nil {
+		t.Fatalf("expected trigger role %s: %v", roleName, err)
+	}
+	if len(role.Rules) != 2 {
+		t.Fatalf("expected 2 trigger policy rules, got %d", len(role.Rules))
+	}
+
+	roleBindingName := triggerRoleBindingName(policy.Name)
+	var roleBinding rbacv1.RoleBinding
+	if err := fakeClient.Get(ctx, types.NamespacedName{Namespace: policy.Namespace, Name: roleBindingName}, &roleBinding); err != nil {
+		t.Fatalf("expected trigger rolebinding %s: %v", roleBindingName, err)
+	}
+	if len(roleBinding.Subjects) != 1 || roleBinding.Subjects[0].Name != triggerServiceAccount {
+		t.Fatalf("expected trigger rolebinding to point at service account %s, got %#v", triggerServiceAccount, roleBinding.Subjects)
+	}
+
 	for _, storageName := range []string{storageA.Name, storageB.Name} {
 		cronJobName := dpv1alpha1.BuildCronJobName(policy.Name, storageName)
 		var cronJob batchv1.CronJob
 		if err := fakeClient.Get(ctx, types.NamespacedName{Namespace: policy.Namespace, Name: cronJobName}, &cronJob); err != nil {
 			t.Fatalf("expected cronjob %s: %v", cronJobName, err)
+		}
+		if cronJob.Spec.JobTemplate.Spec.Template.Spec.ServiceAccountName != triggerServiceAccount {
+			t.Fatalf("expected trigger service account %s for cronjob %s, got %s", triggerServiceAccount, cronJobName, cronJob.Spec.JobTemplate.Spec.Template.Spec.ServiceAccountName)
 		}
 		if len(cronJob.Spec.JobTemplate.Spec.Template.Spec.Containers) != 1 {
 			t.Fatalf("expected trigger cronjob %s to have one container", cronJobName)

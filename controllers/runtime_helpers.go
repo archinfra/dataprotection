@@ -290,7 +290,12 @@ func defaultExecutionTemplate(spec dpv1alpha1.ExecutionTemplateSpec) dpv1alpha1.
 
 // buildBackupCronJob renders a native Kubernetes CronJob that only creates a
 // BackupRun CR. The actual data movement remains in the BackupRun controller.
-func buildBackupCronJob(policy *dpv1alpha1.BackupPolicy, source *dpv1alpha1.BackupSource, storage *dpv1alpha1.BackupStorage) (*batchv1.CronJob, error) {
+func buildBackupCronJob(
+	policy *dpv1alpha1.BackupPolicy,
+	source *dpv1alpha1.BackupSource,
+	storage *dpv1alpha1.BackupStorage,
+	triggerServiceAccount string,
+) (*batchv1.CronJob, error) {
 	execution := defaultExecutionTemplate(policy.Spec.Execution)
 	name := dpv1alpha1.BuildCronJobName(policy.Name, storage.Name)
 	suspended := policy.Spec.Suspend || policy.Spec.Schedule.Suspend
@@ -327,7 +332,7 @@ func buildBackupCronJob(policy *dpv1alpha1.BackupPolicy, source *dpv1alpha1.Back
 						},
 						Spec: corev1.PodSpec{
 							RestartPolicy:      corev1.RestartPolicyNever,
-							ServiceAccountName: defaultTriggerServiceAccountName(),
+							ServiceAccountName: triggerServiceAccount,
 							Containers: []corev1.Container{
 								{
 									Name:            "backup-trigger",

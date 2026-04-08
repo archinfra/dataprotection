@@ -215,7 +215,7 @@ sha256sum "${snapshot_file}" > "${checksum_file}"
   echo "snapshot=$(basename "${snapshot_file}")"
   echo "component=mysql"
   echo "source=${DP_SOURCE_NAME:-}"
-  echo "repository=${DP_REPOSITORY_NAME:-}"
+  echo "storage=${DP_STORAGE_NAME:-}"
   echo "scope=${scope_type}"
   echo "databases=${meta_databases}"
   echo "tables=${meta_tables}"
@@ -380,6 +380,14 @@ mc_cmd() {
   fi
 }
 
+ensure_bucket() {
+  if mc_cmd ls "backup/${S3_BUCKET}" >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "[INFO] remote bucket ${S3_BUCKET} not found, creating it"
+  mc_cmd mb "backup/${S3_BUCKET}" >/dev/null
+}
+
 remote_path="${S3_BUCKET}"
 if [ -n "${S3_PREFIX:-}" ]; then
   remote_path="${remote_path}/${S3_PREFIX}"
@@ -410,6 +418,7 @@ done
 }
 
 mc_cmd alias set backup "${S3_ENDPOINT}" "${S3_ACCESS_KEY}" "${S3_SECRET_KEY}" --api S3v4 >/dev/null
+ensure_bucket
 mc_cmd mirror --overwrite --remove "${local_dir}" "backup/${remote_path}"
 echo "[INFO] s3 upload completed to ${remote_path}"`
 

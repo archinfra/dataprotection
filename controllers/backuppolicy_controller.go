@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -127,11 +129,19 @@ func (r *BackupPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	desiredCronJobNames := make(map[string]struct{}, len(storages))
 	var latestLastScheduleTime *metav1.Time
+	triggerServiceAccount, err := ensureTriggerAccess(ctx, r.Client, r.Scheme, &policy)
+	if err != nil {
+		policy.Status.Phase = dpv1alpha1.ResourcePhasePending
+		policy.Status.LastScheduleTime = nil
+		policy.Status.NextScheduleTime = nil
+		markCondition(&policy.Status.Conditions, "Ready", metav1.ConditionFalse, "TriggerAccessFailed", fmt.Sprintf("unable to ensure scheduled trigger access: %v", err), policy.Generation)
+		return patchStatus(requeueSoon(), nil)
+	}
 	for i := range storages {
 		// Each storage gets its own native CronJob. The CronJob only creates a
 		// BackupRun CR, which keeps scheduling history and data execution history
 		// cleanly separated.
-		desired, err := buildBackupCronJob(&policy, source, &storages[i])
+		desired, err := buildBackupCronJob(&policy, source, &storages[i], triggerServiceAccount)
 		if err != nil {
 			policy.Status.Phase = dpv1alpha1.ResourcePhaseFailed
 			policy.Status.LastScheduleTime = nil
@@ -199,6 +209,9 @@ func (r *BackupPolicyReconciler) cleanupOwnedCronJobs(ctx context.Context, polic
 func (r *BackupPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&dpv1alpha1.BackupPolicy{}).
+		Owns(&corev1.ServiceAccount{}).
+		Owns(&rbacv1.Role{}).
+		Owns(&rbacv1.RoleBinding{}).
 		Owns(&batchv1.CronJob{}).
 		Complete(r)
 }

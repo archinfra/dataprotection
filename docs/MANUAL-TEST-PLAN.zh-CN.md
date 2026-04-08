@@ -1,32 +1,65 @@
-# Data Protection Operator 手工验证方案
+# Data Protection Operator 手工测试方案
 
-这份文档只关注当前真实架构：
+这份文档面向当前真实架构：
 
 - 不再使用 `BackupRepository`
-- 定时模型是 `BackupPolicy -> CronJob -> BackupRun -> Job`
+- 调度模型为 `BackupPolicy -> CronJob -> BackupRun -> Job`
 - 恢复优先使用 `Snapshot`
+- `BackupPolicy` 调度身份由控制器自动在业务 namespace 下创建
 
-## 验证目标
+## 测试目标
 
 1. 安装器能把 operator 正常装起来
-2. `BackupSource`、`BackupStorage`、`BackupPolicy` 能正常进入可用状态
-3. `BackupPolicy` 能生成每个 storage 一个 `CronJob`
-4. `CronJob` 触发后能创建 `BackupRun`
-5. `BackupRun` 能生成 `Job` 和 `Snapshot`
-6. `RestoreRequest` 能按 `snapshotRef` 恢复
+2. `BackupSource`、`BackupStorage`、`RetentionPolicy`、`BackupPolicy` 能进入可用状态
+3. `BackupPolicy` 能为每个 storage 创建一个 `CronJob`
+4. `CronJob` 能自动创建 `BackupRun`
+5. `BackupRun` 能创建数据 `Job`
+6. `BackupRun` 成功后能沉淀 `Snapshot`
+7. `RestoreRequest` 能按 `snapshotRef` 恢复
+8. S3/MinIO 缺 bucket 时能自动创建
+9. NFS 场景能正常写入和恢复
 
 ## 推荐测试命名
 
 - namespace: `backup-system`
 - source: `mysql-smoke`
-- storage: `minio-primary`
+- s3 storage: `minio-primary`
+- nfs storage: `nfs-primary`
 - policy: `mysql-smoke-daily`
 - run: `mysql-smoke-manual`
 - restore: `mysql-smoke-restore`
 
-## 推荐样例
+## 推荐资源清单
 
-### BackupSource
+### 1. Namespace 与 Secret
+
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: backup-system
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mysql-runtime-auth
+  namespace: backup-system
+type: Opaque
+stringData:
+  password: "<MYSQL_ROOT_PASSWORD>"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-credentials
+  namespace: backup-system
+type: Opaque
+stringData:
+  access-key: "<S3_ACCESS_KEY>"
+  secret-key: "<S3_SECRET_KEY>"
+```
+
+### 2. BackupSource
 
 ```yaml
 apiVersion: dataprotection.archinfra.io/v1alpha1
@@ -45,7 +78,7 @@ spec:
       key: password
 ```
 
-### BackupStorage
+### 3. S3 / MinIO BackupStorage
 
 ```yaml
 apiVersion: dataprotection.archinfra.io/v1alpha1
@@ -67,7 +100,44 @@ spec:
       key: secret-key
 ```
 
-### BackupPolicy
+### 4. NFS BackupStorage
+
+```yaml
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: BackupStorage
+metadata:
+  name: nfs-primary
+  namespace: backup-system
+spec:
+  type: nfs
+  nfs:
+    server: <NFS_SERVER>
+    path: <NFS_EXPORT_PATH>
+```
+
+要求：
+
+- `<NFS_EXPORT_PATH>` 需要是实际存在且可写的导出目录
+- 运行时会在这个目录下面再写控制器生成的 `storagePath`
+
+### 5. RetentionPolicy
+
+```yaml
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: RetentionPolicy
+metadata:
+  name: mysql-daily-retention
+  namespace: backup-system
+spec:
+  successfulSnapshots:
+    last: 3
+  failedSnapshots:
+    last: 1
+```
+
+### 6. BackupPolicy
+
+联调建议先用每 3 分钟一次：
 
 ```yaml
 apiVersion: dataprotection.archinfra.io/v1alpha1
@@ -81,13 +151,15 @@ spec:
   storageRefs:
     - name: minio-primary
   schedule:
-    cron: "0 2 * * *"
+    cron: "*/3 * * * *"
     concurrencyPolicy: Forbid
+  retentionPolicyRef:
+    name: mysql-daily-retention
   retention:
     keepLast: 3
 ```
 
-### Manual BackupRun
+### 7. Manual BackupRun
 
 ```yaml
 apiVersion: dataprotection.archinfra.io/v1alpha1
@@ -105,7 +177,7 @@ spec:
   reason: manual smoke backup
 ```
 
-### RestoreRequest
+### 8. RestoreRequest
 
 ```yaml
 apiVersion: dataprotection.archinfra.io/v1alpha1
@@ -125,29 +197,153 @@ spec:
         restoreMode: merge
 ```
 
-## 建议验证顺序
+## 建议测试顺序
 
-1. 安装 operator，确认 Deployment 正常
-2. apply `BackupSource` 和 `BackupStorage`
-3. apply `BackupPolicy`，确认生成 `CronJob`
-4. 手工创建一个 `BackupRun`，确认生成 `Job` 和 `Snapshot`
-5. 等一次定时调度，确认 `CronJob` 能自动创建 `BackupRun`
-6. 用 `snapshotRef` 创建 `RestoreRequest`
+1. 安装 operator，确认 `Deployment` 正常
+2. apply `BackupSource`、`BackupStorage`、`RetentionPolicy`
+3. apply `BackupPolicy`，确认自动生成 `CronJob`
+4. 确认 `BackupPolicy` 所在 namespace 自动生成调度 `ServiceAccount`、`Role`、`RoleBinding`
+5. 手工创建一个 `BackupRun`，确认生成备份 `Job`
+6. 观察备份成功后生成 `Snapshot`
+7. 等待一次定时调度，确认 `CronJob` 能自动创建 `BackupRun`
+8. 用 `snapshotRef` 创建 `RestoreRequest`
+9. 再补测 NFS 场景
+10. 再补测 MinIO bucket 不存在时的自动创建
 
-## 核心观察点
+## 关键观察命令
 
-- `kubectl get backuppolicy -o yaml`
-  关注 `status.cronJobNames`
-- `kubectl get backuprun -o yaml`
-  关注 `status.jobNames` 和 `status.storages`
-- `kubectl get snapshot -o yaml`
-  关注 `spec.storageRef`、`spec.storagePath`、`spec.snapshot`
-- `kubectl get restorerequest -o yaml`
-  关注 `status.jobName`
+### 安装与控制器
+
+```bash
+kubectl get pods -n data-protection-system
+kubectl logs -n data-protection-system deploy/data-protection-operator-controller-manager
+```
+
+### 核心 CRD 状态
+
+```bash
+kubectl get backupsource -n backup-system
+kubectl get backupstorage -n backup-system
+kubectl get retentionpolicy -n backup-system
+kubectl get backuppolicy -n backup-system
+kubectl get backuprun -n backup-system
+kubectl get snapshot -n backup-system
+kubectl get restorerequest -n backup-system
+```
+
+### 调度身份与定时资源
+
+```bash
+kubectl get sa -n backup-system
+kubectl get role -n backup-system
+kubectl get rolebinding -n backup-system
+kubectl get cronjob -n backup-system
+kubectl get job -n backup-system
+kubectl get pod -n backup-system
+```
+
+### 详情与日志
+
+```bash
+kubectl get backuppolicy mysql-smoke-daily -n backup-system -o yaml
+kubectl get backuprun mysql-smoke-manual -n backup-system -o yaml
+kubectl describe job -n backup-system <job-name>
+kubectl describe pod -n backup-system <pod-name>
+kubectl logs -n backup-system <pod-name> -c mysql-backup
+kubectl logs -n backup-system <pod-name> -c s3-upload
+kubectl logs -n backup-system <pod-name> -c s3-prefetch
+kubectl logs -n backup-system <pod-name> -c mysql-restore
+kubectl logs -n backup-system <pod-name> -c s3-download
+```
+
+## 重点验证点
+
+### A. `BackupPolicy` 调度身份自动创建
+
+预期：
+
+- `backup-system` 中自动出现一个触发 `ServiceAccount`
+- 同 namespace 自动出现对应 `Role`
+- 同 namespace 自动出现对应 `RoleBinding`
+- `CronJob.spec.jobTemplate.spec.template.spec.serviceAccountName` 指向这个 SA
+
+这一步通过后，说明已经不需要再手工补调度 SA。
+
+### B. MinIO / S3 自动创建 bucket
+
+做法：
+
+- 创建一个不存在的 bucket 名称
+- 触发备份
+
+预期：
+
+- `mysql-backup` 正常完成
+- `s3-upload` 日志里能看到创建 bucket 的信息
+- 远端 bucket 被自动创建
+- `BackupRun` 最终成功
+
+### C. NFS 备份
+
+做法：
+
+- 使用 `nfs-primary`
+- 触发 `BackupRun`
+
+预期：
+
+- Pod 能正常挂载 NFS
+- 备份目录能写入 `.sql.gz`、`.sha256`、`.meta`、`latest.txt`
+- `BackupRun` 和 `Snapshot` 最终成功
+
+### D. 定时调度
+
+做法：
+
+- 等待 cron 到点，或直接观察下一次 3 分钟触发
+
+预期：
+
+- 先出现一个短命 trigger Pod
+- trigger Pod 完成后生成一个新的 `BackupRun`
+- `BackupRun` 再生成真正的数据 `Job`
+
+### E. 为什么会出现多个 Pod / 容器
+
+如果是“定时 + S3 / MinIO”，常见现象是：
+
+- 一个短命 trigger Pod，只有 `backup-trigger`
+- 一个真正的备份 Pod
+
+备份 Pod 内部通常包含：
+
+- `s3-prefetch` init container
+- `mysql-backup` 主容器
+- `s3-upload` 辅助容器
+
+所以你可能会同时看到：
+
+- `Completed` 的 trigger Pod
+- `Running` 或 `Completed` 的备份 Pod
+
+这不是重复执行，而是调度层和数据层分离后的正常结果。
+
+### F. 恢复
+
+做法：
+
+- 先等待 `Snapshot` 生成
+- 使用 `snapshotRef` 创建 `RestoreRequest`
+
+预期：
+
+- 生成 restore Job
+- restore Job 成功
+- 目标 MySQL 数据恢复
 
 ## 结果判断
 
-如果上面这条链路都通过，可以判断当前仓库已经具备：
+如果以上链路都通过，可以判断当前仓库已经具备：
 
 - 可维护的调度模型
 - 可审计的执行历史

@@ -1,0 +1,12 @@
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: BackupStorage
+metadata:
+  name: nfs-primary
+  namespace: backup-system
+spec:
+  # Use an existing writable export path. The mysql runtime writes backup
+  # artifacts under the controller-managed storagePath below this root.
+  type: nfs
+  nfs:
+    server: 10.0.0.20
+    path: /exports/data-protection
