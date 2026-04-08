@@ -274,6 +274,9 @@ func (minioBuiltInAddon) BuildBackupJob(request addonBackupJobRequest) (*batchv1
 		Spec: batchv1.JobSpec{
 			BackoffLimit:            cloneInt32Ptr(execution.BackoffLimit),
 			TTLSecondsAfterFinished: cloneInt32Ptr(execution.TTLSecondsAfterFinished),
+			Parallelism:             int32Ptr(1),
+			Completions:             int32Ptr(1),
+			PodReplacementPolicy:    podReplacementPolicyPtr(batchv1.Failed),
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels:      copyStringMap(labels),
@@ -322,6 +325,9 @@ func (minioBuiltInAddon) BuildRestoreJob(request addonRestoreJobRequest) (*batch
 		Spec: batchv1.JobSpec{
 			BackoffLimit:            cloneInt32Ptr(execution.BackoffLimit),
 			TTLSecondsAfterFinished: cloneInt32Ptr(execution.TTLSecondsAfterFinished),
+			Parallelism:             int32Ptr(1),
+			Completions:             int32Ptr(1),
+			PodReplacementPolicy:    podReplacementPolicyPtr(batchv1.Failed),
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels:      copyStringMap(labels),

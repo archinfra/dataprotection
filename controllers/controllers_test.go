@@ -85,6 +85,15 @@ func TestBackupPolicyReconcileCreatesCronJobsPerStorage(t *testing.T) {
 		if cronJob.Spec.JobTemplate.Spec.Template.Spec.ServiceAccountName != triggerServiceAccount {
 			t.Fatalf("expected trigger service account %s for cronjob %s, got %s", triggerServiceAccount, cronJobName, cronJob.Spec.JobTemplate.Spec.Template.Spec.ServiceAccountName)
 		}
+		if cronJob.Spec.JobTemplate.Spec.Parallelism == nil || *cronJob.Spec.JobTemplate.Spec.Parallelism != 1 {
+			t.Fatalf("expected trigger job template parallelism 1 for cronjob %s", cronJobName)
+		}
+		if cronJob.Spec.JobTemplate.Spec.Completions == nil || *cronJob.Spec.JobTemplate.Spec.Completions != 1 {
+			t.Fatalf("expected trigger job template completions 1 for cronjob %s", cronJobName)
+		}
+		if cronJob.Spec.JobTemplate.Spec.PodReplacementPolicy == nil || *cronJob.Spec.JobTemplate.Spec.PodReplacementPolicy != batchv1.Failed {
+			t.Fatalf("expected trigger job template podReplacementPolicy Failed for cronjob %s", cronJobName)
+		}
 		if len(cronJob.Spec.JobTemplate.Spec.Template.Spec.Containers) != 1 {
 			t.Fatalf("expected trigger cronjob %s to have one container", cronJobName)
 		}
@@ -138,6 +147,15 @@ func TestBackupRunReconcileCreatesJobsAndSnapshotsPerStorage(t *testing.T) {
 		var job batchv1.Job
 		if err := fakeClient.Get(ctx, types.NamespacedName{Namespace: run.Namespace, Name: jobName}, &job); err != nil {
 			t.Fatalf("expected job %s: %v", jobName, err)
+		}
+		if job.Spec.Parallelism == nil || *job.Spec.Parallelism != 1 {
+			t.Fatalf("expected job %s parallelism 1", jobName)
+		}
+		if job.Spec.Completions == nil || *job.Spec.Completions != 1 {
+			t.Fatalf("expected job %s completions 1", jobName)
+		}
+		if job.Spec.PodReplacementPolicy == nil || *job.Spec.PodReplacementPolicy != batchv1.Failed {
+			t.Fatalf("expected job %s podReplacementPolicy Failed", jobName)
 		}
 		if job.Spec.TTLSecondsAfterFinished == nil || *job.Spec.TTLSecondsAfterFinished != 86400 {
 			t.Fatalf("expected default ttlSecondsAfterFinished 86400 for job %s", jobName)

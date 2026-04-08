@@ -332,6 +332,9 @@ func buildBackupCronJob(
 				},
 				Spec: batchv1.JobSpec{
 					BackoffLimit: int32Ptr(1),
+					Parallelism:  int32Ptr(1),
+					Completions:  int32Ptr(1),
+					PodReplacementPolicy: podReplacementPolicyPtr(batchv1.Failed),
 					Template: corev1.PodTemplateSpec{
 						ObjectMeta: metav1.ObjectMeta{
 							Labels:      copyStringMap(labels),
@@ -459,7 +462,7 @@ func buildRestoreJob(
 }
 
 func buildJobSpec(execution dpv1alpha1.ExecutionTemplateSpec, labels map[string]string, env []corev1.EnvVar, operation string) batchv1.JobSpec {
-	return batchv1.JobSpec{
+	return singleExecutionJobSpec(batchv1.JobSpec{
 		BackoffLimit:            cloneInt32Ptr(execution.BackoffLimit),
 		TTLSecondsAfterFinished: cloneInt32Ptr(execution.TTLSecondsAfterFinished),
 		Template: corev1.PodTemplateSpec{
@@ -468,7 +471,14 @@ func buildJobSpec(execution dpv1alpha1.ExecutionTemplateSpec, labels map[string]
 			},
 			Spec: buildPodSpec(execution, env, operation),
 		},
-	}
+	})
+}
+
+func singleExecutionJobSpec(spec batchv1.JobSpec) batchv1.JobSpec {
+	spec.Parallelism = int32Ptr(1)
+	spec.Completions = int32Ptr(1)
+	spec.PodReplacementPolicy = podReplacementPolicyPtr(batchv1.Failed)
+	return spec
 }
 
 func buildPodSpec(execution dpv1alpha1.ExecutionTemplateSpec, env []corev1.EnvVar, operation string) corev1.PodSpec {
@@ -790,6 +800,10 @@ func int32Ptr(value int32) *int32 {
 }
 
 func boolPtr(value bool) *bool {
+	return &value
+}
+
+func podReplacementPolicyPtr(value batchv1.PodReplacementPolicy) *batchv1.PodReplacementPolicy {
 	return &value
 }
 

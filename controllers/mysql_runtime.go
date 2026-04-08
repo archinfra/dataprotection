@@ -523,6 +523,9 @@ func buildBuiltInMySQLBackupRunJob(run *dpv1alpha1.BackupRun, policy *dpv1alpha1
 		Spec: batchv1.JobSpec{
 			BackoffLimit:            cloneInt32Ptr(execution.BackoffLimit),
 			TTLSecondsAfterFinished: cloneInt32Ptr(execution.TTLSecondsAfterFinished),
+			Parallelism:             int32Ptr(1),
+			Completions:             int32Ptr(1),
+			PodReplacementPolicy:    podReplacementPolicyPtr(batchv1.Failed),
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels:      copyStringMap(labels),
@@ -564,6 +567,9 @@ func buildBuiltInMySQLRestoreJob(restore *dpv1alpha1.RestoreRequest, backupRun *
 		Spec: batchv1.JobSpec{
 			BackoffLimit:            cloneInt32Ptr(execution.BackoffLimit),
 			TTLSecondsAfterFinished: cloneInt32Ptr(execution.TTLSecondsAfterFinished),
+			Parallelism:             int32Ptr(1),
+			Completions:             int32Ptr(1),
+			PodReplacementPolicy:    podReplacementPolicyPtr(batchv1.Failed),
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels:      copyStringMap(labels),
