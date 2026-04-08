@@ -29,7 +29,7 @@
     "arch": "amd64",
     "platform": "linux/amd64",
     "name": "dataprotection-redis",
-    "pull": "public.ecr.aws/docker/library/redis:7.2.7-alpine",
+    "pull": "redis:7.2.7-alpine",
     "tag": "sealos.hub:5000/kube4/dataprotection-redis:7.2.7-alpine",
     "tar": "dataprotection-redis-7.2.7-alpine-amd64.tar",
     "platform": "linux/amd64"
@@ -38,7 +38,7 @@
     "arch": "amd64",
     "platform": "linux/amd64",
     "name": "dataprotection-busybox",
-    "pull": "public.ecr.aws/docker/library/busybox:1.36",
+    "pull": "registry.cn-beijing.aliyuncs.com/kube4/busybox:v1",
     "tag": "sealos.hub:5000/kube4/dataprotection-busybox:v1",
     "tar": "dataprotection-busybox-v1-amd64.tar",
     "platform": "linux/amd64"
@@ -73,7 +73,7 @@
     "arch": "arm64",
     "platform": "linux/arm64",
     "name": "dataprotection-redis",
-    "pull": "public.ecr.aws/docker/library/redis:7.2.7-alpine",
+    "pull": "redis:7.2.7-alpine",
     "tag": "sealos.hub:5000/kube4/dataprotection-redis:7.2.7-alpine",
     "tar": "dataprotection-redis-7.2.7-alpine-arm64.tar",
     "platform": "linux/arm64"
@@ -82,7 +82,7 @@
     "arch": "arm64",
     "platform": "linux/arm64",
     "name": "dataprotection-busybox",
-    "pull": "public.ecr.aws/docker/library/busybox:1.36",
+    "pull": "registry.cn-beijing.aliyuncs.com/kube4/busybox:v1",
     "tag": "sealos.hub:5000/kube4/dataprotection-busybox:v1",
     "tar": "dataprotection-busybox-v1-arm64.tar",
     "platform": "linux/arm64"

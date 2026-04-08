@@ -99,7 +99,7 @@ jobs:
               echo "mysql_dockerhub=docker.io/${dockerhub_namespace}/dataprotection-mysql:8.0.45"
               echo "mc_dockerhub=docker.io/${dockerhub_namespace}/dataprotection-minio-mc:latest"
               echo "redis_dockerhub=docker.io/${dockerhub_namespace}/dataprotection-redis:7.2.7-alpine"
-              echo "busybox_dockerhub=docker.io/${dockerhub_namespace}/dataprotection-busybox:1.36"
+              echo "busybox_dockerhub=docker.io/${dockerhub_namespace}/dataprotection-busybox:v1"
             else
               echo "mysql_dockerhub="
               echo "mc_dockerhub="
@@ -110,7 +110,7 @@ jobs:
               echo "mysql_aliyun=${aliyun_registry}/${aliyun_namespace}/dataprotection-mysql:8.0.45"
               echo "mc_aliyun=${aliyun_registry}/${aliyun_namespace}/dataprotection-minio-mc:latest"
               echo "redis_aliyun=${aliyun_registry}/${aliyun_namespace}/dataprotection-redis:7.2.7-alpine"
-              echo "busybox_aliyun=${aliyun_registry}/${aliyun_namespace}/dataprotection-busybox:1.36"
+              echo "busybox_aliyun=${aliyun_registry}/${aliyun_namespace}/dataprotection-busybox:v1"
             else
               echo "mysql_aliyun="
               echo "mc_aliyun="
@@ -246,8 +246,8 @@ jobs:
 
           create_aliases "public.ecr.aws/docker/library/mysql:8.0.45" "${MYSQL_DOCKERHUB}" "${MYSQL_ALIYUN}"
           create_aliases "minio/mc:latest" "${MC_DOCKERHUB}" "${MC_ALIYUN}"
-          create_aliases "public.ecr.aws/docker/library/redis:7.2.7-alpine" "${REDIS_DOCKERHUB}" "${REDIS_ALIYUN}"
-          create_aliases "public.ecr.aws/docker/library/busybox:1.36" "${BUSYBOX_DOCKERHUB}" "${BUSYBOX_ALIYUN}"
+          create_aliases "redis:7.2.7-alpine" "${REDIS_DOCKERHUB}" "${REDIS_ALIYUN}"
+          create_aliases "registry.cn-beijing.aliyuncs.com/kube4/busybox:v1" "${BUSYBOX_DOCKERHUB}" "${BUSYBOX_ALIYUN}"
 
   build-installers:
     runs-on: ubuntu-latest
