@@ -276,6 +276,7 @@ jobs:
       - name: Download installers
         uses: actions/download-artifact@v4
         with:
+          pattern: data-protection-operator-*
           path: dist
 
       - name: Publish GitHub release
