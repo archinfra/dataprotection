@@ -3,6 +3,8 @@ package controllers
 import (
 	"strings"
 	"testing"
+
+	corev1 "k8s.io/api/core/v1"
 )
 
 func TestMySQLS3UploadScriptCreatesBucketWhenMissing(t *testing.T) {
@@ -20,5 +22,14 @@ func TestMySQLBackupScriptRecordsStorageName(t *testing.T) {
 	}
 	if strings.Contains(mysqlBackupScript, `DP_REPOSITORY_NAME`) {
 		t.Fatalf("did not expect deprecated repository metadata in mysql backup script")
+	}
+}
+
+func TestDefaultImagePullPolicyUsesAlwaysForMutableTags(t *testing.T) {
+	if got := defaultImagePullPolicy("sealos.hub:5000/kube4/dataprotection-operator:latest"); got != corev1.PullAlways {
+		t.Fatalf("expected mutable latest tag to default to Always, got %s", got)
+	}
+	if got := defaultImagePullPolicy("mysql:8.0.45"); got != corev1.PullIfNotPresent {
+		t.Fatalf("expected immutable versioned tag to default to IfNotPresent, got %s", got)
 	}
 }

@@ -280,7 +280,7 @@ func defaultExecutionTemplate(spec dpv1alpha1.ExecutionTemplateSpec) dpv1alpha1.
 		spec.RunnerImage = defaultPlaceholderRunnerImage()
 	}
 	if spec.ImagePullPolicy == "" {
-		spec.ImagePullPolicy = corev1.PullIfNotPresent
+		spec.ImagePullPolicy = defaultImagePullPolicy(spec.RunnerImage)
 	}
 	if spec.BackoffLimit == nil {
 		spec.BackoffLimit = int32Ptr(1)
@@ -300,6 +300,10 @@ func buildBackupCronJob(
 	triggerServiceAccount string,
 ) (*batchv1.CronJob, error) {
 	execution := defaultExecutionTemplate(policy.Spec.Execution)
+	triggerImagePullPolicy := execution.ImagePullPolicy
+	if policy.Spec.Execution.ImagePullPolicy == "" {
+		triggerImagePullPolicy = defaultImagePullPolicy(defaultControllerImage())
+	}
 	name := dpv1alpha1.BuildCronJobName(policy.Name, storage.Name)
 	suspended := policy.Spec.Suspend || policy.Spec.Schedule.Suspend
 	labels := managedResourceLabels("BackupPolicy", policy.Name, "scheduled-trigger", source.Name, storage.Name)
@@ -340,7 +344,7 @@ func buildBackupCronJob(
 								{
 									Name:            "backup-trigger",
 									Image:           defaultControllerImage(),
-									ImagePullPolicy: execution.ImagePullPolicy,
+									ImagePullPolicy: triggerImagePullPolicy,
 									Args: []string{
 										"trigger-backup-run",
 										"--namespace=" + policy.Namespace,

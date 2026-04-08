@@ -4,6 +4,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	corev1 "k8s.io/api/core/v1"
 )
 
 const (
@@ -30,6 +32,15 @@ func defaultS3HelperImage() string {
 
 func defaultControllerImage() string {
 	return envOrDefault("DP_DEFAULT_CONTROLLER_IMAGE", defaultControllerImageValue)
+}
+
+func defaultImagePullPolicy(images ...string) corev1.PullPolicy {
+	for _, image := range images {
+		if imageUsesMutableTag(image) {
+			return corev1.PullAlways
+		}
+	}
+	return corev1.PullIfNotPresent
 }
 
 func defaultJobTTLSeconds() *int32 {
@@ -65,4 +76,21 @@ func envOrDefaultInt32(key string, fallback int32) int32 {
 		return fallback
 	}
 	return int32(parsed)
+}
+
+func imageUsesMutableTag(image string) bool {
+	image = strings.TrimSpace(image)
+	if image == "" {
+		return false
+	}
+	if strings.Contains(image, "@sha256:") {
+		return false
+	}
+	lastSlash := strings.LastIndex(image, "/")
+	lastColon := strings.LastIndex(image, ":")
+	if lastColon <= lastSlash {
+		return true
+	}
+	tag := strings.TrimSpace(image[lastColon+1:])
+	return tag == "" || tag == "latest"
 }
