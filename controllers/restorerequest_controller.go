@@ -206,6 +206,11 @@ func (r *RestoreRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	jobExecutionPhase, message, completedAt := jobPhase(current)
+	if jobExecutionPhase == dpv1alpha1.ResourcePhaseFailed {
+		if detail := describeLatestJobPodFailure(ctx, r.Client, current); detail != "" {
+			message = fmt.Sprintf("%s; %s", message, detail)
+		}
+	}
 	restore.Status.Phase = jobExecutionPhase
 	restore.Status.Message = message
 	if jobExecutionPhase == dpv1alpha1.ResourcePhaseSucceeded || jobExecutionPhase == dpv1alpha1.ResourcePhaseFailed {

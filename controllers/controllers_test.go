@@ -314,6 +314,28 @@ func TestBackupRunReconcileDoesNotRetainFailedSnapshots(t *testing.T) {
 	if err := fakeClient.Status().Update(ctx, &job); err != nil {
 		t.Fatalf("update job status %s: %v", jobName, err)
 	}
+	failedPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      jobName + "-pod",
+			Namespace: run.Namespace,
+			Labels:    map[string]string{"job-name": job.Name},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodFailed,
+			ContainerStatuses: []corev1.ContainerStatus{{
+				Name: "mysql-backup",
+				State: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{
+						ExitCode: 1,
+						Reason:   "Error",
+					},
+				},
+			}},
+		},
+	}
+	if err := fakeClient.Create(ctx, failedPod); err != nil {
+		t.Fatalf("create failed pod: %v", err)
+	}
 
 	if _, err := reconciler.Reconcile(ctx, req); err != nil {
 		t.Fatalf("second reconcile failed: %v", err)
@@ -335,8 +357,12 @@ func TestBackupRunReconcileDoesNotRetainFailedSnapshots(t *testing.T) {
 	if updatedRun.Status.Storages[0].Snapshot != "" {
 		t.Fatalf("expected failed storage branch to have empty snapshot name, got %q", updatedRun.Status.Storages[0].Snapshot)
 	}
-	if updatedRun.Status.Storages[0].Message != "job retry budget exhausted (backoffLimit reached); inspect the latest Pod logs" {
+	expectedMessage := "job retry budget exhausted (backoffLimit reached); inspect the latest Pod logs; latest pod " + failedPod.Name + ": container mysql-backup exited 1 (Error)"
+	if updatedRun.Status.Storages[0].Message != expectedMessage {
 		t.Fatalf("unexpected failed job message: %q", updatedRun.Status.Storages[0].Message)
+	}
+	if updatedRun.Status.Message != expectedMessage {
+		t.Fatalf("expected top-level run message to mirror single storage failure detail, got %q", updatedRun.Status.Message)
 	}
 
 	snapshotName := dpv1alpha1.BuildSnapshotName(run.Name, storage.Name, "snapshot")
@@ -560,8 +586,17 @@ func TestBackupRunReconcilePrunesScheduledRunHistory(t *testing.T) {
 	oldSuccessA := newScheduledTerminalRun("backup-system", "mysql-daily-scheduled-old-a", policy.Name, storage.Name, dpv1alpha1.ResourcePhaseSucceeded, time.Now().Add(-3*time.Hour))
 	oldSuccessB := newScheduledTerminalRun("backup-system", "mysql-daily-scheduled-old-b", policy.Name, storage.Name, dpv1alpha1.ResourcePhaseSucceeded, time.Now().Add(-2*time.Hour))
 	oldFailed := newScheduledTerminalRun("backup-system", "mysql-daily-scheduled-old-failed", policy.Name, storage.Name, dpv1alpha1.ResourcePhaseFailed, time.Now().Add(-1*time.Hour))
+	oldSuccessAJob := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      dpv1alpha1.BuildJobName(oldSuccessA.Name, storage.Name),
+			Namespace: currentRun.Namespace,
+		},
+	}
+	if err := ctrl.SetControllerReference(oldSuccessA, oldSuccessAJob, scheme); err != nil {
+		t.Fatalf("set controller reference on old success job: %v", err)
+	}
 
-	fakeClient := newFakeClient(t, scheme, source, storage, policy, retentionPolicy, currentRun, oldSuccessA, oldSuccessB, oldFailed)
+	fakeClient := newFakeClient(t, scheme, source, storage, policy, retentionPolicy, currentRun, oldSuccessA, oldSuccessB, oldFailed, oldSuccessAJob)
 	reconciler := &BackupRunReconciler{Client: fakeClient, Scheme: scheme}
 
 	req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(currentRun)}
@@ -608,6 +643,16 @@ func TestBackupRunReconcilePrunesScheduledRunHistory(t *testing.T) {
 	}
 	if _, ok := runNames[oldSuccessA.Name]; ok {
 		t.Fatalf("did not expect oldest successful scheduled run to remain")
+	}
+
+	var jobs batchv1.JobList
+	if err := fakeClient.List(ctx, &jobs, client.InNamespace(currentRun.Namespace)); err != nil {
+		t.Fatalf("list jobs: %v", err)
+	}
+	for _, job := range jobs.Items {
+		if strings.HasPrefix(job.Name, oldSuccessA.Name+"-") {
+			t.Fatalf("did not expect pruned scheduled run job %s to remain", job.Name)
+		}
 	}
 }
 

@@ -2,10 +2,12 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -162,4 +164,63 @@ func isTerminalBackupRun(phase dpv1alpha1.ResourcePhase) bool {
 	default:
 		return false
 	}
+}
+
+func describeLatestJobPodFailure(ctx context.Context, c client.Client, job *batchv1.Job) string {
+	var podList corev1.PodList
+	if err := c.List(ctx, &podList,
+		client.InNamespace(job.Namespace),
+		client.MatchingLabels{"job-name": job.Name},
+	); err != nil {
+		return ""
+	}
+	if len(podList.Items) == 0 {
+		return ""
+	}
+
+	sort.SliceStable(podList.Items, func(i, j int) bool {
+		left := podList.Items[i].CreationTimestamp.Time
+		right := podList.Items[j].CreationTimestamp.Time
+		if left.Equal(right) {
+			return podList.Items[i].Name > podList.Items[j].Name
+		}
+		return left.After(right)
+	})
+	latest := &podList.Items[0]
+
+	failures := collectContainerFailures(latest.Status.InitContainerStatuses, true)
+	failures = append(failures, collectContainerFailures(latest.Status.ContainerStatuses, false)...)
+	if len(failures) == 0 {
+		return fmt.Sprintf("latest pod %s phase=%s", latest.Name, latest.Status.Phase)
+	}
+	return fmt.Sprintf("latest pod %s: %s", latest.Name, strings.Join(failures, "; "))
+}
+
+func collectContainerFailures(statuses []corev1.ContainerStatus, init bool) []string {
+	failures := make([]string, 0)
+	prefix := "container"
+	if init {
+		prefix = "init"
+	}
+	for _, status := range statuses {
+		if terminated := status.State.Terminated; terminated != nil {
+			if terminated.ExitCode == 0 {
+				continue
+			}
+			reason := strings.TrimSpace(terminated.Reason)
+			if reason == "" {
+				reason = "terminated"
+			}
+			failures = append(failures, fmt.Sprintf("%s %s exited %d (%s)", prefix, status.Name, terminated.ExitCode, reason))
+			continue
+		}
+		if waiting := status.State.Waiting; waiting != nil {
+			reason := strings.TrimSpace(waiting.Reason)
+			if reason == "" {
+				reason = "waiting"
+			}
+			failures = append(failures, fmt.Sprintf("%s %s waiting (%s)", prefix, status.Name, reason))
+		}
+	}
+	return failures
 }

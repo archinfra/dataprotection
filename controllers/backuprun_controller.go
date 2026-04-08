@@ -201,6 +201,11 @@ func (r *BackupRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 
 		storagePhase, message, completedAt := jobPhase(current)
+		if storagePhase == dpv1alpha1.ResourcePhaseFailed {
+			if detail := describeLatestJobPodFailure(ctx, r.Client, current); detail != "" {
+				message = fmt.Sprintf("%s; %s", message, detail)
+			}
+		}
 		if completedAt != nil && (latestCompletedAt == nil || completedAt.After(latestCompletedAt.Time)) {
 			latestCompletedAt = completedAt.DeepCopy()
 		}
@@ -259,7 +264,10 @@ func (r *BackupRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return result, r.pruneScheduledRunHistory(ctx, &run, keepLast, failedKeepLast)
 	case dpv1alpha1.ResourcePhaseFailed:
 		run.Status.Message = "one or more storage backup jobs failed"
-		markCondition(&run.Status.Conditions, "Completed", metav1.ConditionFalse, "JobFailed", "one or more storage backup jobs failed", run.Generation)
+		if len(storageStatuses) == 1 && strings.TrimSpace(storageStatuses[0].Message) != "" {
+			run.Status.Message = storageStatuses[0].Message
+		}
+		markCondition(&run.Status.Conditions, "Completed", metav1.ConditionFalse, "JobFailed", run.Status.Message, run.Generation)
 		result, err := patchStatus(ctrl.Result{}, nil)
 		if err != nil {
 			return result, err
@@ -517,11 +525,31 @@ func (r *BackupRunReconciler) pruneScheduledRunHistory(
 		if !shouldDelete {
 			continue
 		}
+		if err := r.deleteOwnedJobsForRun(ctx, candidate); err != nil {
+			return err
+		}
 		if err := r.Delete(ctx, candidate); err != nil && !apierrors.IsNotFound(err) {
 			return err
 		}
 	}
 
+	return nil
+}
+
+func (r *BackupRunReconciler) deleteOwnedJobsForRun(ctx context.Context, run *dpv1alpha1.BackupRun) error {
+	var jobList batchv1.JobList
+	if err := r.List(ctx, &jobList, client.InNamespace(run.Namespace)); err != nil {
+		return err
+	}
+	for i := range jobList.Items {
+		job := &jobList.Items[i]
+		if !metav1.IsControlledBy(job, run) {
+			continue
+		}
+		if err := r.Delete(ctx, job); err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+	}
 	return nil
 }
 
