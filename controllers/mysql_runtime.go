@@ -388,6 +388,33 @@ ensure_bucket() {
   mc_cmd mb "backup/${S3_BUCKET}" >/dev/null
 }
 
+verify_remote_upload() {
+  local snapshot_name=""
+
+  mc_cmd ls "backup/${remote_path}" >/dev/null 2>&1 || {
+    echo "[ERROR] unable to list uploaded backup path: ${remote_path}"
+    exit 1
+  }
+
+  if [ -f "${local_dir}/latest.txt" ]; then
+    snapshot_name="$(cat "${local_dir}/latest.txt")"
+    [ -n "${snapshot_name}" ] || {
+      echo "[ERROR] local latest.txt is empty"
+      exit 1
+    }
+
+    mc_cmd stat "backup/${remote_path}/latest.txt" >/dev/null 2>&1 || {
+      echo "[ERROR] uploaded latest.txt not found at ${remote_path}"
+      exit 1
+    }
+
+    mc_cmd stat "backup/${remote_path}/snapshots/${snapshot_name}" >/dev/null 2>&1 || {
+      echo "[ERROR] uploaded snapshot ${snapshot_name} not found at ${remote_path}/snapshots"
+      exit 1
+    }
+  fi
+}
+
 remote_path="${S3_BUCKET}"
 if [ -n "${S3_PREFIX:-}" ]; then
   remote_path="${remote_path}/${S3_PREFIX}"
@@ -420,6 +447,7 @@ done
 mc_cmd alias set backup "${S3_ENDPOINT}" "${S3_ACCESS_KEY}" "${S3_SECRET_KEY}" --api S3v4 >/dev/null
 ensure_bucket
 mc_cmd mirror --overwrite --remove "${local_dir}" "backup/${remote_path}"
+verify_remote_upload
 echo "[INFO] s3 upload completed to ${remote_path}"`
 
 const mysqlS3DownloadScript = `set -eu

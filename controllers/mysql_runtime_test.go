@@ -9,6 +9,9 @@ func TestMySQLS3UploadScriptCreatesBucketWhenMissing(t *testing.T) {
 	if !strings.Contains(mysqlS3UploadScript, `mc_cmd mb "backup/${S3_BUCKET}"`) {
 		t.Fatalf("expected s3 upload script to create the bucket when it is missing")
 	}
+	if !strings.Contains(mysqlS3UploadScript, `mc_cmd stat "backup/${remote_path}/snapshots/${snapshot_name}"`) {
+		t.Fatalf("expected s3 upload script to verify the uploaded snapshot on the remote backend")
+	}
 }
 
 func TestMySQLBackupScriptRecordsStorageName(t *testing.T) {
