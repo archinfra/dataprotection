@@ -16,7 +16,34 @@ spec:
     singular: snapshot
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.latest
+      name: Latest
+      type: boolean
+    - jsonPath: .status.artifactReady
+      name: Ready
+      type: boolean
+    - jsonPath: .spec.sourceRef.name
+      name: Source
+      type: string
+    - jsonPath: .spec.storageRef.name
+      name: Storage
+      type: string
+    - jsonPath: .status.completedAt
+      name: Completed
+      type: date
+    - jsonPath: .spec.snapshot
+      name: Snapshot
+      priority: 1
+      type: string
+    - jsonPath: .status.message
+      name: Message
+      priority: 1
+      type: string
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         properties:
@@ -104,6 +131,8 @@ spec:
             type: object
           status:
             properties:
+              artifactReady:
+                type: boolean
               completedAt:
                 format: date-time
                 type: string
@@ -163,6 +192,10 @@ spec:
                   - type
                   type: object
                 type: array
+              latest:
+                type: boolean
+              message:
+                type: string
               observedGeneration:
                 format: int64
                 type: integer

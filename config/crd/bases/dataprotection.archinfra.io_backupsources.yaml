@@ -16,7 +16,21 @@ spec:
     singular: backupsource
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .spec.driver
+      name: Driver
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .spec.paused
+      name: Paused
+      type: boolean
+    - jsonPath: .status.message
+      name: Message
+      priority: 1
+      type: string
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         properties:
@@ -294,6 +308,8 @@ spec:
                 type: array
               lastValidatedTime:
                 format: date-time
+                type: string
+              message:
                 type: string
               observedGeneration:
                 format: int64

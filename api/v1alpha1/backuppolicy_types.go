@@ -26,12 +26,19 @@ type BackupPolicyStatus struct {
 	ObservedGeneration int64              `json:"observedGeneration,omitempty"`
 	LastScheduleTime   *metav1.Time       `json:"lastScheduleTime,omitempty"`
 	NextScheduleTime   *metav1.Time       `json:"nextScheduleTime,omitempty"`
+	Message            string             `json:"message,omitempty"`
 	CronJobNames       []string           `json:"cronJobNames,omitempty"`
 	Conditions         []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Source",type=string,JSONPath=`.spec.sourceRef.name`
+// +kubebuilder:printcolumn:name="Schedule",type=string,JSONPath=`.spec.schedule.cron`
+// +kubebuilder:printcolumn:name="Suspend",type=boolean,JSONPath=`.spec.suspend`
+// +kubebuilder:printcolumn:name="LastSchedule",type=date,JSONPath=`.status.lastScheduleTime`
+// +kubebuilder:printcolumn:name="Message",type=string,priority=1,JSONPath=`.status.message`
 // +kubebuilder:resource:shortName=bp
 type BackupPolicy struct {
 	metav1.TypeMeta   `json:",inline"`

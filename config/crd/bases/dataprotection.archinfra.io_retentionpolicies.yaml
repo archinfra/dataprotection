@@ -16,7 +16,24 @@ spec:
     singular: retentionpolicy
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .spec.successfulSnapshots.last
+      name: SuccessKeep
+      type: integer
+    - jsonPath: .spec.failedSnapshots.last
+      name: FailedKeep
+      type: integer
+    - jsonPath: .spec.default
+      name: Default
+      type: boolean
+    - jsonPath: .status.message
+      name: Message
+      priority: 1
+      type: string
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         properties:
@@ -114,6 +131,8 @@ spec:
                   - type
                   type: object
                 type: array
+              message:
+                type: string
               observedGeneration:
                 format: int64
                 type: integer

@@ -50,6 +50,7 @@ func (r *RestoreRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err := restore.Spec.ValidateBasic(); err != nil {
 		restore.Status.Phase = dpv1alpha1.ResourcePhaseFailed
 		restore.Status.CompletedAt = nowTime()
+		restore.Status.Message = err.Error()
 		restore.Status.JobName = ""
 		markCondition(&restore.Status.Conditions, "Accepted", metav1.ConditionFalse, "InvalidSpec", err.Error(), restore.Generation)
 		markCondition(&restore.Status.Conditions, "Completed", metav1.ConditionFalse, "InvalidSpec", err.Error(), restore.Generation)
@@ -62,6 +63,7 @@ func (r *RestoreRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		case isDependencyMissing(err):
 			restore.Status.Phase = dpv1alpha1.ResourcePhasePending
 			restore.Status.CompletedAt = nil
+			restore.Status.Message = fmt.Sprintf("unable to resolve BackupSource %q: %v", restore.Spec.SourceRef.Name, err)
 			restore.Status.JobName = ""
 			markCondition(&restore.Status.Conditions, "Accepted", metav1.ConditionFalse, "DependencyNotReady", fmt.Sprintf("unable to resolve BackupSource %q: %v", restore.Spec.SourceRef.Name, err), restore.Generation)
 			markCondition(&restore.Status.Conditions, "Completed", metav1.ConditionFalse, "DependencyNotReady", phaseMessage(restore.Status.Phase), restore.Generation)
@@ -73,8 +75,9 @@ func (r *RestoreRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err := source.Spec.ValidateBasic(); err != nil {
 		restore.Status.Phase = dpv1alpha1.ResourcePhaseFailed
 		restore.Status.CompletedAt = nowTime()
-		restore.Status.JobName = ""
 		message := fmt.Sprintf("referenced BackupSource %q is invalid: %v", source.Name, err)
+		restore.Status.Message = message
+		restore.Status.JobName = ""
 		markCondition(&restore.Status.Conditions, "Accepted", metav1.ConditionFalse, "InvalidSource", message, restore.Generation)
 		markCondition(&restore.Status.Conditions, "Completed", metav1.ConditionFalse, "InvalidSource", message, restore.Generation)
 		return patchStatus(ctrl.Result{}, nil)
@@ -89,12 +92,14 @@ func (r *RestoreRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		case isDependencyMissing(err):
 			restore.Status.Phase = dpv1alpha1.ResourcePhasePending
 			restore.Status.CompletedAt = nil
+			restore.Status.Message = err.Error()
 			markCondition(&restore.Status.Conditions, "Accepted", metav1.ConditionFalse, "DependencyNotReady", err.Error(), restore.Generation)
 			markCondition(&restore.Status.Conditions, "Completed", metav1.ConditionFalse, "DependencyNotReady", phaseMessage(restore.Status.Phase), restore.Generation)
 			return patchStatus(requeueSoon(), nil)
 		case isPermanentDependencyError(err):
 			restore.Status.Phase = dpv1alpha1.ResourcePhaseFailed
 			restore.Status.CompletedAt = nowTime()
+			restore.Status.Message = err.Error()
 			markCondition(&restore.Status.Conditions, "Accepted", metav1.ConditionFalse, "InvalidReference", err.Error(), restore.Generation)
 			markCondition(&restore.Status.Conditions, "Completed", metav1.ConditionFalse, "InvalidReference", err.Error(), restore.Generation)
 			return patchStatus(ctrl.Result{}, nil)
@@ -106,8 +111,9 @@ func (r *RestoreRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		if snapshotRef.Spec.SourceRef.Name != restore.Spec.SourceRef.Name {
 			restore.Status.Phase = dpv1alpha1.ResourcePhaseFailed
 			restore.Status.CompletedAt = nowTime()
-			restore.Status.JobName = ""
 			message := fmt.Sprintf("spec.sourceRef.name %q does not match snapshot %q sourceRef %q", restore.Spec.SourceRef.Name, snapshotRef.Name, snapshotRef.Spec.SourceRef.Name)
+			restore.Status.Message = message
+			restore.Status.JobName = ""
 			markCondition(&restore.Status.Conditions, "Accepted", metav1.ConditionFalse, "InvalidReference", message, restore.Generation)
 			markCondition(&restore.Status.Conditions, "Completed", metav1.ConditionFalse, "InvalidReference", message, restore.Generation)
 			return patchStatus(ctrl.Result{}, nil)
@@ -117,8 +123,9 @@ func (r *RestoreRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if backupRun != nil && backupRun.Spec.SourceRef.Name != restore.Spec.SourceRef.Name {
 		restore.Status.Phase = dpv1alpha1.ResourcePhaseFailed
 		restore.Status.CompletedAt = nowTime()
-		restore.Status.JobName = ""
 		message := fmt.Sprintf("spec.sourceRef.name %q does not match backupRun %q sourceRef %q", restore.Spec.SourceRef.Name, backupRun.Name, backupRun.Spec.SourceRef.Name)
+		restore.Status.Message = message
+		restore.Status.JobName = ""
 		markCondition(&restore.Status.Conditions, "Accepted", metav1.ConditionFalse, "InvalidReference", message, restore.Generation)
 		markCondition(&restore.Status.Conditions, "Completed", metav1.ConditionFalse, "InvalidReference", message, restore.Generation)
 		return patchStatus(ctrl.Result{}, nil)
@@ -153,6 +160,7 @@ func (r *RestoreRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			if isDependencyMissing(err) {
 				restore.Status.Phase = dpv1alpha1.ResourcePhasePending
 				restore.Status.CompletedAt = nil
+				restore.Status.Message = fmt.Sprintf("referenced BackupPolicy %q is not ready: %v", backupRun.Spec.PolicyRef.Name, err)
 				restore.Status.JobName = ""
 				markCondition(&restore.Status.Conditions, "Accepted", metav1.ConditionFalse, "DependencyNotReady", fmt.Sprintf("referenced BackupPolicy %q is not ready: %v", backupRun.Spec.PolicyRef.Name, err), restore.Generation)
 				markCondition(&restore.Status.Conditions, "Completed", metav1.ConditionFalse, "DependencyNotReady", phaseMessage(restore.Status.Phase), restore.Generation)
@@ -167,6 +175,7 @@ func (r *RestoreRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err != nil {
 		restore.Status.Phase = dpv1alpha1.ResourcePhaseFailed
 		restore.Status.CompletedAt = nowTime()
+		restore.Status.Message = err.Error()
 		restore.Status.JobName = ""
 		markCondition(&restore.Status.Conditions, "Accepted", metav1.ConditionFalse, "RenderFailed", err.Error(), restore.Generation)
 		markCondition(&restore.Status.Conditions, "Completed", metav1.ConditionFalse, "RenderFailed", err.Error(), restore.Generation)
@@ -190,6 +199,7 @@ func (r *RestoreRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		restore.Status.Phase = dpv1alpha1.ResourcePhaseFailed
 		restore.Status.CompletedAt = nowTime()
 		message := fmt.Sprintf("existing Job %q is not controlled by RestoreRequest %q", current.Name, restore.Name)
+		restore.Status.Message = message
 		markCondition(&restore.Status.Conditions, "Accepted", metav1.ConditionFalse, "JobNameConflict", message, restore.Generation)
 		markCondition(&restore.Status.Conditions, "Completed", metav1.ConditionFalse, "JobNameConflict", message, restore.Generation)
 		return patchStatus(ctrl.Result{}, nil)
@@ -197,6 +207,7 @@ func (r *RestoreRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	jobExecutionPhase, message, completedAt := jobPhase(current)
 	restore.Status.Phase = jobExecutionPhase
+	restore.Status.Message = message
 	if jobExecutionPhase == dpv1alpha1.ResourcePhaseSucceeded || jobExecutionPhase == dpv1alpha1.ResourcePhaseFailed {
 		if completedAt == nil {
 			completedAt = nowTime()

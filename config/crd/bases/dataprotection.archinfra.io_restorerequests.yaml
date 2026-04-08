@@ -16,7 +16,27 @@ spec:
     singular: restorerequest
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .spec.sourceRef.name
+      name: Source
+      type: string
+    - jsonPath: .spec.snapshotRef.name
+      name: SnapshotRef
+      type: string
+    - jsonPath: .spec.target.mode
+      name: Mode
+      type: string
+    - jsonPath: .status.completedAt
+      name: Completed
+      type: date
+    - jsonPath: .status.message
+      name: Message
+      priority: 1
+      type: string
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         properties:
@@ -371,6 +391,8 @@ spec:
                   type: object
                 type: array
               jobName:
+                type: string
+              message:
                 type: string
               observedGeneration:
                 format: int64

@@ -35,12 +35,15 @@ func (r *BackupSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	if err := source.Spec.ValidateBasic(); err != nil {
 		source.Status.Phase = dpv1alpha1.ResourcePhaseFailed
+		source.Status.Message = err.Error()
 		markCondition(&source.Status.Conditions, "Ready", metav1.ConditionFalse, "InvalidSpec", err.Error(), source.Generation)
 	} else if source.Spec.Paused {
 		source.Status.Phase = dpv1alpha1.ResourcePhasePaused
+		source.Status.Message = phaseMessage(source.Status.Phase)
 		markCondition(&source.Status.Conditions, "Ready", metav1.ConditionFalse, "Paused", phaseMessage(source.Status.Phase), source.Generation)
 	} else {
 		source.Status.Phase = dpv1alpha1.ResourcePhaseReady
+		source.Status.Message = "backup source specification is valid"
 		markCondition(&source.Status.Conditions, "Ready", metav1.ConditionTrue, "Validated", "backup source specification is valid", source.Generation)
 	}
 

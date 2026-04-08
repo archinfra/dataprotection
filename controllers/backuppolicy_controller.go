@@ -51,6 +51,7 @@ func (r *BackupPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			return ctrl.Result{}, cleanupErr
 		}
 		policy.Status.Phase = dpv1alpha1.ResourcePhaseFailed
+		policy.Status.Message = err.Error()
 		policy.Status.LastScheduleTime = nil
 		policy.Status.NextScheduleTime = nil
 		markCondition(&policy.Status.Conditions, "Ready", metav1.ConditionFalse, "InvalidSpec", err.Error(), policy.Generation)
@@ -63,6 +64,7 @@ func (r *BackupPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			return ctrl.Result{}, cleanupErr
 		}
 		policy.Status.Phase = dpv1alpha1.ResourcePhasePending
+		policy.Status.Message = fmt.Sprintf("unable to resolve BackupSource %q: %v", policy.Spec.SourceRef.Name, err)
 		policy.Status.LastScheduleTime = nil
 		policy.Status.NextScheduleTime = nil
 		reason := "DependencyNotReady"
@@ -77,6 +79,7 @@ func (r *BackupPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			return ctrl.Result{}, cleanupErr
 		}
 		policy.Status.Phase = dpv1alpha1.ResourcePhaseFailed
+		policy.Status.Message = fmt.Sprintf("referenced BackupSource %q is invalid: %v", source.Name, err)
 		policy.Status.LastScheduleTime = nil
 		policy.Status.NextScheduleTime = nil
 		markCondition(&policy.Status.Conditions, "Ready", metav1.ConditionFalse, "InvalidSource", fmt.Sprintf("referenced BackupSource %q is invalid: %v", source.Name, err), policy.Generation)
@@ -89,6 +92,7 @@ func (r *BackupPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			return ctrl.Result{}, cleanupErr
 		}
 		policy.Status.Phase = dpv1alpha1.ResourcePhasePending
+		policy.Status.Message = fmt.Sprintf("unable to resolve BackupStorage references: %v", err)
 		policy.Status.LastScheduleTime = nil
 		policy.Status.NextScheduleTime = nil
 		reason := "DependencyNotReady"
@@ -111,6 +115,7 @@ func (r *BackupPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			return ctrl.Result{}, cleanupErr
 		}
 		policy.Status.Phase = dpv1alpha1.ResourcePhasePending
+		policy.Status.Message = err.Error()
 		policy.Status.LastScheduleTime = nil
 		policy.Status.NextScheduleTime = nil
 		reason := "DependencyNotReady"
@@ -132,6 +137,7 @@ func (r *BackupPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	triggerServiceAccount, err := ensureTriggerAccess(ctx, r.Client, r.Scheme, &policy)
 	if err != nil {
 		policy.Status.Phase = dpv1alpha1.ResourcePhasePending
+		policy.Status.Message = fmt.Sprintf("unable to ensure scheduled trigger access: %v", err)
 		policy.Status.LastScheduleTime = nil
 		policy.Status.NextScheduleTime = nil
 		markCondition(&policy.Status.Conditions, "Ready", metav1.ConditionFalse, "TriggerAccessFailed", fmt.Sprintf("unable to ensure scheduled trigger access: %v", err), policy.Generation)
@@ -144,6 +150,7 @@ func (r *BackupPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		desired, err := buildBackupCronJob(&policy, source, &storages[i], triggerServiceAccount)
 		if err != nil {
 			policy.Status.Phase = dpv1alpha1.ResourcePhaseFailed
+			policy.Status.Message = err.Error()
 			policy.Status.LastScheduleTime = nil
 			policy.Status.NextScheduleTime = nil
 			markCondition(&policy.Status.Conditions, "Ready", metav1.ConditionFalse, "RenderFailed", err.Error(), policy.Generation)
@@ -176,11 +183,13 @@ func (r *BackupPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	suspended := policy.Spec.Suspend || policy.Spec.Schedule.Suspend
 	if suspended {
 		policy.Status.Phase = dpv1alpha1.ResourcePhasePaused
+		policy.Status.Message = fmt.Sprintf("managed %d suspended CronJob resource(s)", len(desiredCronJobNames))
 		markCondition(&policy.Status.Conditions, "Ready", metav1.ConditionFalse, "Suspended", fmt.Sprintf("managed %d suspended CronJob resource(s)", len(desiredCronJobNames)), policy.Generation)
 		return patchStatus(ctrl.Result{}, nil)
 	}
 
 	policy.Status.Phase = dpv1alpha1.ResourcePhaseReady
+	policy.Status.Message = fmt.Sprintf("managed %d CronJob resource(s) across %d storage target(s)", len(desiredCronJobNames), len(storages))
 	markCondition(&policy.Status.Conditions, "Ready", metav1.ConditionTrue, "Reconciled", fmt.Sprintf("managed %d CronJob resource(s) across %d storage target(s)", len(desiredCronJobNames), len(storages)), policy.Generation)
 	return patchStatus(ctrl.Result{}, nil)
 }

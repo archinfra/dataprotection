@@ -26,12 +26,19 @@ type RestoreRequestStatus struct {
 	ObservedGeneration int64              `json:"observedGeneration,omitempty"`
 	StartedAt          *metav1.Time       `json:"startedAt,omitempty"`
 	CompletedAt        *metav1.Time       `json:"completedAt,omitempty"`
+	Message            string             `json:"message,omitempty"`
 	JobName            string             `json:"jobName,omitempty"`
 	Conditions         []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Source",type=string,JSONPath=`.spec.sourceRef.name`
+// +kubebuilder:printcolumn:name="SnapshotRef",type=string,JSONPath=`.spec.snapshotRef.name`
+// +kubebuilder:printcolumn:name="Mode",type=string,JSONPath=`.spec.target.mode`
+// +kubebuilder:printcolumn:name="Completed",type=date,JSONPath=`.status.completedAt`
+// +kubebuilder:printcolumn:name="Message",type=string,priority=1,JSONPath=`.status.message`
 // +kubebuilder:resource:shortName=rr
 type RestoreRequest struct {
 	metav1.TypeMeta   `json:",inline"`

@@ -24,6 +24,7 @@ type BackupRunStatus struct {
 	ObservedGeneration int64              `json:"observedGeneration,omitempty"`
 	StartedAt          *metav1.Time       `json:"startedAt,omitempty"`
 	CompletedAt        *metav1.Time       `json:"completedAt,omitempty"`
+	Message            string             `json:"message,omitempty"`
 	JobNames           []string           `json:"jobNames,omitempty"`
 	Storages           []StorageRunStatus `json:"storages,omitempty"`
 	Conditions         []metav1.Condition `json:"conditions,omitempty"`
@@ -31,6 +32,12 @@ type BackupRunStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Policy",type=string,JSONPath=`.spec.policyRef.name`
+// +kubebuilder:printcolumn:name="Source",type=string,JSONPath=`.spec.sourceRef.name`
+// +kubebuilder:printcolumn:name="Completed",type=date,JSONPath=`.status.completedAt`
+// +kubebuilder:printcolumn:name="Snapshot",type=string,priority=1,JSONPath=`.spec.snapshot`
+// +kubebuilder:printcolumn:name="Message",type=string,priority=1,JSONPath=`.status.message`
 // +kubebuilder:resource:shortName=br
 type BackupRun struct {
 	metav1.TypeMeta   `json:",inline"`

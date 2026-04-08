@@ -35,9 +35,11 @@ func (r *BackupStorageReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	if err := storage.Spec.ValidateBasic(); err != nil {
 		storage.Status.Phase = dpv1alpha1.ResourcePhaseFailed
+		storage.Status.Message = err.Error()
 		markCondition(&storage.Status.Conditions, "Ready", metav1.ConditionFalse, "InvalidSpec", err.Error(), storage.Generation)
 	} else {
 		storage.Status.Phase = dpv1alpha1.ResourcePhaseReady
+		storage.Status.Message = "backup storage specification is valid"
 		markCondition(&storage.Status.Conditions, "Ready", metav1.ConditionTrue, "Validated", "backup storage specification is valid", storage.Generation)
 	}
 

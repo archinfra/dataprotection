@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"time"
 
@@ -71,6 +72,22 @@ func resolveKeepLastRetention(ctx context.Context, c client.Client, namespace st
 	return keepLast, retentionPolicy, nil
 }
 
+func resolveFailedRetention(ctx context.Context, c client.Client, namespace, refName string) (int32, *dpv1alpha1.RetentionPolicy, error) {
+	refName = trimString(refName)
+	if refName == "" {
+		return 0, nil, nil
+	}
+
+	retentionPolicy, err := getRetentionPolicy(ctx, c, namespace, refName)
+	if err != nil {
+		return 0, nil, err
+	}
+	if err := retentionPolicy.Spec.ValidateBasic(); err != nil {
+		return 0, retentionPolicy, newPermanentDependencyError("referenced RetentionPolicy %q is invalid: %v", retentionPolicy.Name, err)
+	}
+	return retentionPolicy.Spec.FailedSnapshots.Last, retentionPolicy, nil
+}
+
 func trimString(value string) string {
 	return strings.TrimSpace(value)
 }
@@ -80,4 +97,25 @@ func localRefName(ref *corev1.LocalObjectReference) string {
 		return ""
 	}
 	return trimString(ref.Name)
+}
+
+func snapshotSortTime(snapshot *dpv1alpha1.Snapshot) time.Time {
+	if snapshot.Status.CompletedAt != nil {
+		return snapshot.Status.CompletedAt.Time
+	}
+	if snapshot.Status.StartedAt != nil {
+		return snapshot.Status.StartedAt.Time
+	}
+	return snapshot.CreationTimestamp.Time
+}
+
+func sortSnapshotsNewestFirst(items []*dpv1alpha1.Snapshot) {
+	sort.SliceStable(items, func(i, j int) bool {
+		left := snapshotSortTime(items[i])
+		right := snapshotSortTime(items[j])
+		if left.Equal(right) {
+			return items[i].Name > items[j].Name
+		}
+		return left.After(right)
+	})
 }

@@ -21,11 +21,22 @@ type SnapshotStatus struct {
 	ObservedGeneration int64              `json:"observedGeneration,omitempty"`
 	StartedAt          *metav1.Time       `json:"startedAt,omitempty"`
 	CompletedAt        *metav1.Time       `json:"completedAt,omitempty"`
+	Message            string             `json:"message,omitempty"`
+	Latest             bool               `json:"latest,omitempty"`
+	ArtifactReady      bool               `json:"artifactReady,omitempty"`
 	Conditions         []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Latest",type=boolean,JSONPath=`.status.latest`
+// +kubebuilder:printcolumn:name="Ready",type=boolean,JSONPath=`.status.artifactReady`
+// +kubebuilder:printcolumn:name="Source",type=string,JSONPath=`.spec.sourceRef.name`
+// +kubebuilder:printcolumn:name="Storage",type=string,JSONPath=`.spec.storageRef.name`
+// +kubebuilder:printcolumn:name="Completed",type=date,JSONPath=`.status.completedAt`
+// +kubebuilder:printcolumn:name="Snapshot",type=string,priority=1,JSONPath=`.spec.snapshot`
+// +kubebuilder:printcolumn:name="Message",type=string,priority=1,JSONPath=`.status.message`
 // +kubebuilder:resource:shortName=snap
 type Snapshot struct {
 	metav1.TypeMeta   `json:",inline"`

@@ -16,11 +16,16 @@ type BackupSourceStatus struct {
 	Phase              ResourcePhase      `json:"phase,omitempty"`
 	ObservedGeneration int64              `json:"observedGeneration,omitempty"`
 	LastValidatedTime  *metav1.Time       `json:"lastValidatedTime,omitempty"`
+	Message            string             `json:"message,omitempty"`
 	Conditions         []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Driver",type=string,JSONPath=`.spec.driver`
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Paused",type=boolean,JSONPath=`.spec.paused`
+// +kubebuilder:printcolumn:name="Message",type=string,priority=1,JSONPath=`.status.message`
 // +kubebuilder:resource:shortName=bsrc
 type BackupSource struct {
 	metav1.TypeMeta   `json:",inline"`

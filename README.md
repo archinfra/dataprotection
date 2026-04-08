@@ -27,6 +27,7 @@ BackupPolicy
 
 - Redis 当前内建 addon 先把“稳定备份”跑通，恢复先保留给后续版本或自定义 execution。
 - MinIO 的 `includeVersions=true` 还没有内建实现，当前会直接拒绝，避免误以为已经备份了版本历史。
+- retention 现在会同时治理后端文件和控制面 `Snapshot` 对象，不再只清文件不清 CR。
 
 ## 架构原则
 
@@ -178,6 +179,12 @@ kubectl get rp -A
 ```bash
 kubectl get bsrc,bst,bp,br,snap,rr,rp -n backup-system
 ```
+
+新版 `kubectl get` 里会直接展示更适合运维的列，例如：
+
+- `kubectl get snap -A` 会看到 `Phase / Latest / Ready / Source / Storage`
+- `kubectl get br -A` 会看到 `Phase / Policy / Source / Completed`
+- `kubectl get bp -A` 会看到 `Phase / Source / Schedule / LastSchedule`
 
 ## 手工测试建议
 

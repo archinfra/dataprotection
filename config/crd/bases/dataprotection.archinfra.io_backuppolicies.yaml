@@ -16,7 +16,27 @@ spec:
     singular: backuppolicy
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .spec.sourceRef.name
+      name: Source
+      type: string
+    - jsonPath: .spec.schedule.cron
+      name: Schedule
+      type: string
+    - jsonPath: .spec.suspend
+      name: Suspend
+      type: boolean
+    - jsonPath: .status.lastScheduleTime
+      name: LastSchedule
+      type: date
+    - jsonPath: .status.message
+      name: Message
+      priority: 1
+      type: string
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         properties:
@@ -560,6 +580,8 @@ spec:
                 type: array
               lastScheduleTime:
                 format: date-time
+                type: string
+              message:
                 type: string
               nextScheduleTime:
                 format: date-time

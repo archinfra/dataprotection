@@ -17,11 +17,16 @@ type BackupStorageStatus struct {
 	Phase              ResourcePhase      `json:"phase,omitempty"`
 	ObservedGeneration int64              `json:"observedGeneration,omitempty"`
 	LastValidatedTime  *metav1.Time       `json:"lastValidatedTime,omitempty"`
+	Message            string             `json:"message,omitempty"`
 	Conditions         []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.spec.type`
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Default",type=boolean,JSONPath=`.spec.default`
+// +kubebuilder:printcolumn:name="Message",type=string,priority=1,JSONPath=`.status.message`
 // +kubebuilder:resource:shortName=bst
 type BackupStorage struct {
 	metav1.TypeMeta   `json:",inline"`

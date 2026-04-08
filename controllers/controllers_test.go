@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"testing"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -244,6 +245,127 @@ func TestRestoreRequestReconcileUsesSnapshotStoragePath(t *testing.T) {
 	}
 	if got := job.Annotations[storagePathAnnotation]; got != snapshot.Spec.StoragePath {
 		t.Fatalf("expected storage path annotation %q, got %q", snapshot.Spec.StoragePath, got)
+	}
+}
+
+func TestBackupRunReconcilePrunesOldSnapshotsAndMarksLatest(t *testing.T) {
+	scheme := newTestScheme(t)
+	ctx := context.Background()
+
+	source := newMySQLSource("backup-system", "mysql-prod")
+	storage := newS3Storage("backup-system", "minio-primary", "smoke")
+	policy := &dpv1alpha1.BackupPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "mysql-daily", Namespace: "backup-system", UID: types.UID("policy-uid")},
+		Spec: dpv1alpha1.BackupPolicySpec{
+			SourceRef:   corev1.LocalObjectReference{Name: source.Name},
+			StorageRefs: []corev1.LocalObjectReference{{Name: storage.Name}},
+			Schedule:    dpv1alpha1.BackupScheduleSpec{Cron: "*/5 * * * *"},
+			Retention:   dpv1alpha1.RetentionRule{KeepLast: 2},
+		},
+	}
+	run := &dpv1alpha1.BackupRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "scheduled-new", Namespace: "backup-system", UID: types.UID("run-uid")},
+		Spec: dpv1alpha1.BackupRunSpec{
+			PolicyRef:   &corev1.LocalObjectReference{Name: policy.Name},
+			SourceRef:   corev1.LocalObjectReference{Name: source.Name},
+			StorageRefs: []corev1.LocalObjectReference{{Name: storage.Name}},
+		},
+	}
+
+	storagePath := backupArtifactPath(source, policy, run)
+	oldSnapshotA := &dpv1alpha1.Snapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "scheduled-old-a-minio-primary-snapshot", Namespace: "backup-system"},
+		Spec: dpv1alpha1.SnapshotSpec{
+			SourceRef:    corev1.LocalObjectReference{Name: source.Name},
+			BackupRunRef: corev1.LocalObjectReference{Name: "scheduled-old-a"},
+			StorageRef:   corev1.LocalObjectReference{Name: storage.Name},
+			StoragePath:  storagePath,
+			Driver:       dpv1alpha1.BackupDriverMySQL,
+			Snapshot:     "scheduled-old-a.sql.gz",
+		},
+		Status: dpv1alpha1.SnapshotStatus{
+			Phase:       dpv1alpha1.ResourcePhaseSucceeded,
+			CompletedAt: &metav1.Time{Time: time.Now().Add(-2 * time.Hour)},
+		},
+	}
+	oldSnapshotB := &dpv1alpha1.Snapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "scheduled-old-b-minio-primary-snapshot", Namespace: "backup-system"},
+		Spec: dpv1alpha1.SnapshotSpec{
+			SourceRef:    corev1.LocalObjectReference{Name: source.Name},
+			BackupRunRef: corev1.LocalObjectReference{Name: "scheduled-old-b"},
+			StorageRef:   corev1.LocalObjectReference{Name: storage.Name},
+			StoragePath:  storagePath,
+			Driver:       dpv1alpha1.BackupDriverMySQL,
+			Snapshot:     "scheduled-old-b.sql.gz",
+		},
+		Status: dpv1alpha1.SnapshotStatus{
+			Phase:       dpv1alpha1.ResourcePhaseSucceeded,
+			CompletedAt: &metav1.Time{Time: time.Now().Add(-1 * time.Hour)},
+		},
+	}
+
+	fakeClient := newFakeClient(t, scheme, source, storage, policy, run, oldSnapshotA, oldSnapshotB)
+	reconciler := &BackupRunReconciler{Client: fakeClient, Scheme: scheme}
+
+	req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(run)}
+	if _, err := reconciler.Reconcile(ctx, req); err != nil {
+		t.Fatalf("first reconcile failed: %v", err)
+	}
+
+	jobName := dpv1alpha1.BuildJobName(run.Name, storage.Name)
+	var job batchv1.Job
+	if err := fakeClient.Get(ctx, types.NamespacedName{Namespace: run.Namespace, Name: jobName}, &job); err != nil {
+		t.Fatalf("expected job %s: %v", jobName, err)
+	}
+	job.Status.Succeeded = 1
+	job.Status.Conditions = []batchv1.JobCondition{{
+		Type:               batchv1.JobComplete,
+		Status:             corev1.ConditionTrue,
+		LastTransitionTime: metav1.Now(),
+	}}
+	if err := fakeClient.Status().Update(ctx, &job); err != nil {
+		t.Fatalf("update job status %s: %v", jobName, err)
+	}
+
+	if _, err := reconciler.Reconcile(ctx, req); err != nil {
+		t.Fatalf("second reconcile failed: %v", err)
+	}
+
+	var snapshots dpv1alpha1.SnapshotList
+	if err := fakeClient.List(ctx, &snapshots, client.InNamespace(run.Namespace)); err != nil {
+		t.Fatalf("list snapshots: %v", err)
+	}
+
+	if len(snapshots.Items) != 2 {
+		t.Fatalf("expected 2 retained snapshots after pruning, got %d", len(snapshots.Items))
+	}
+
+	currentName := dpv1alpha1.BuildSnapshotName(run.Name, storage.Name, "snapshot")
+	foundCurrent := false
+	foundPrevious := false
+	for _, snapshot := range snapshots.Items {
+		switch snapshot.Name {
+		case currentName:
+			foundCurrent = true
+			if !snapshot.Status.Latest {
+				t.Fatalf("expected current snapshot %s to be marked latest", snapshot.Name)
+			}
+			if !snapshot.Status.ArtifactReady {
+				t.Fatalf("expected current snapshot %s to be artifact-ready", snapshot.Name)
+			}
+		case oldSnapshotB.Name:
+			foundPrevious = true
+			if snapshot.Status.Latest {
+				t.Fatalf("did not expect retained previous snapshot %s to be latest", snapshot.Name)
+			}
+		}
+	}
+
+	if !foundCurrent {
+		t.Fatalf("expected current snapshot %s to remain", currentName)
+	}
+	if !foundPrevious {
+		t.Fatalf("expected newest historical snapshot %s to remain", oldSnapshotB.Name)
 	}
 }
 

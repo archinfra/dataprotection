@@ -151,6 +151,23 @@ kubectl get rr -A
 kubectl get rp -A
 ```
 
+特别建议你多看这两个：
+
+```bash
+kubectl get snap -n backup-system
+kubectl get br -n backup-system
+```
+
+现在 `snap` 会直接显示：
+
+- `Phase`
+- `Latest`
+- `Ready`
+- `Source`
+- `Storage`
+
+而且 retention 生效后，老的 `Snapshot` CR 也会一起被清掉，不会再只删存储后端文件。
+
 ## 9. 当前边界
 
 - Redis restore 还没有做成内建 addon。

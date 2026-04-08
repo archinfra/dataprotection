@@ -34,9 +34,11 @@ func (r *RetentionPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	if err := retentionPolicy.Spec.ValidateBasic(); err != nil {
 		retentionPolicy.Status.Phase = dpv1alpha1.ResourcePhaseFailed
+		retentionPolicy.Status.Message = err.Error()
 		markCondition(&retentionPolicy.Status.Conditions, "Ready", metav1.ConditionFalse, "InvalidSpec", err.Error(), retentionPolicy.Generation)
 	} else {
 		retentionPolicy.Status.Phase = dpv1alpha1.ResourcePhaseReady
+		retentionPolicy.Status.Message = "retention policy specification is valid"
 		markCondition(&retentionPolicy.Status.Conditions, "Ready", metav1.ConditionTrue, "Validated", "retention policy specification is valid", retentionPolicy.Generation)
 	}
 

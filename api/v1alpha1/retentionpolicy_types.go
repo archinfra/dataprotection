@@ -16,11 +16,17 @@ type RetentionPolicySpec struct {
 type RetentionPolicyStatus struct {
 	Phase              ResourcePhase      `json:"phase,omitempty"`
 	ObservedGeneration int64              `json:"observedGeneration,omitempty"`
+	Message            string             `json:"message,omitempty"`
 	Conditions         []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="SuccessKeep",type=integer,JSONPath=`.spec.successfulSnapshots.last`
+// +kubebuilder:printcolumn:name="FailedKeep",type=integer,JSONPath=`.spec.failedSnapshots.last`
+// +kubebuilder:printcolumn:name="Default",type=boolean,JSONPath=`.spec.default`
+// +kubebuilder:printcolumn:name="Message",type=string,priority=1,JSONPath=`.status.message`
 // +kubebuilder:resource:shortName=rp
 type RetentionPolicy struct {
 	metav1.TypeMeta   `json:",inline"`
