@@ -166,9 +166,9 @@ func isTerminalBackupRun(phase dpv1alpha1.ResourcePhase) bool {
 	}
 }
 
-func describeLatestJobPodFailure(ctx context.Context, c client.Client, job *batchv1.Job) string {
+func describeLatestJobPodFailure(ctx context.Context, reader client.Reader, job *batchv1.Job) string {
 	var podList corev1.PodList
-	if err := c.List(ctx, &podList,
+	if err := reader.List(ctx, &podList,
 		client.InNamespace(job.Namespace),
 		client.MatchingLabels{"job-name": job.Name},
 	); err != nil {

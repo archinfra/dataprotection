@@ -19,7 +19,8 @@ import (
 
 type RestoreRequestReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme    *runtime.Scheme
+	APIReader client.Reader
 }
 
 func (r *RestoreRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -207,7 +208,7 @@ func (r *RestoreRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	jobExecutionPhase, message, completedAt := jobPhase(current)
 	if jobExecutionPhase == dpv1alpha1.ResourcePhaseFailed {
-		if detail := describeLatestJobPodFailure(ctx, r.Client, current); detail != "" {
+		if detail := describeLatestJobPodFailure(ctx, r.podReader(), current); detail != "" {
 			message = fmt.Sprintf("%s; %s", message, detail)
 		}
 	}
@@ -244,4 +245,11 @@ func (r *RestoreRequestReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&dpv1alpha1.RestoreRequest{}).
 		Owns(&batchv1.Job{}).
 		Complete(r)
+}
+
+func (r *RestoreRequestReconciler) podReader() client.Reader {
+	if r.APIReader != nil {
+		return r.APIReader
+	}
+	return r.Client
 }
