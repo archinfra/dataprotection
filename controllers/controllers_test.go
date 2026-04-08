@@ -83,6 +83,9 @@ func TestBackupPolicyReconcileCreatesCronJobsPerStorage(t *testing.T) {
 		if cronJob.Spec.FailedJobsHistoryLimit == nil || *cronJob.Spec.FailedJobsHistoryLimit != 1 {
 			t.Fatalf("expected trigger failed history limit 1 for cronjob %s", cronJobName)
 		}
+		if cronJob.Spec.JobTemplate.Spec.BackoffLimit == nil || *cronJob.Spec.JobTemplate.Spec.BackoffLimit != 0 {
+			t.Fatalf("expected trigger backoffLimit 0 for cronjob %s", cronJobName)
+		}
 		if cronJob.Spec.JobTemplate.Spec.Template.Spec.ServiceAccountName != triggerServiceAccount {
 			t.Fatalf("expected trigger service account %s for cronjob %s, got %s", triggerServiceAccount, cronJobName, cronJob.Spec.JobTemplate.Spec.Template.Spec.ServiceAccountName)
 		}
@@ -148,6 +151,9 @@ func TestBackupRunReconcileCreatesJobsAndSnapshotsPerStorage(t *testing.T) {
 		var job batchv1.Job
 		if err := fakeClient.Get(ctx, types.NamespacedName{Namespace: run.Namespace, Name: jobName}, &job); err != nil {
 			t.Fatalf("expected job %s: %v", jobName, err)
+		}
+		if job.Spec.BackoffLimit == nil || *job.Spec.BackoffLimit != 0 {
+			t.Fatalf("expected job %s backoffLimit 0", jobName)
 		}
 		if job.Spec.Parallelism == nil || *job.Spec.Parallelism != 1 {
 			t.Fatalf("expected job %s parallelism 1", jobName)

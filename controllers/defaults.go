@@ -15,6 +15,7 @@ const (
 	defaultMinIORunnerImageValue       = "minio/mc:latest"
 	defaultS3HelperImageValue          = "minio/mc:latest"
 	defaultControllerImageValue        = "sealos.hub:5000/kube4/dataprotection-operator:latest"
+	defaultJobBackoffLimitValue        = int32(0)
 	defaultJobTTLSecondsValue          = int32(86400)
 	defaultCronJobSuccessHistoryValue  = int32(1)
 	defaultCronJobFailedHistoryValue   = int32(1)
@@ -55,6 +56,11 @@ func defaultImagePullPolicy(images ...string) corev1.PullPolicy {
 
 func defaultJobTTLSeconds() *int32 {
 	value := envOrDefaultInt32("DP_DEFAULT_JOB_TTL_SECONDS", defaultJobTTLSecondsValue)
+	return &value
+}
+
+func defaultJobBackoffLimit() *int32 {
+	value := envOrDefaultInt32("DP_DEFAULT_JOB_BACKOFF_LIMIT", defaultJobBackoffLimitValue)
 	return &value
 }
 

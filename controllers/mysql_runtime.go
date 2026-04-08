@@ -811,7 +811,7 @@ func defaultMySQLExecutionTemplate(spec dpv1alpha1.ExecutionTemplateSpec) dpv1al
 		spec.ImagePullPolicy = defaultImagePullPolicy(spec.RunnerImage, spec.HelperImage)
 	}
 	if spec.BackoffLimit == nil {
-		spec.BackoffLimit = int32Ptr(1)
+		spec.BackoffLimit = defaultJobBackoffLimit()
 	}
 	if spec.TTLSecondsAfterFinished == nil {
 		spec.TTLSecondsAfterFinished = defaultJobTTLSeconds()

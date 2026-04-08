@@ -314,7 +314,7 @@ func defaultExecutionTemplate(spec dpv1alpha1.ExecutionTemplateSpec) dpv1alpha1.
 		spec.ImagePullPolicy = defaultImagePullPolicy(spec.RunnerImage)
 	}
 	if spec.BackoffLimit == nil {
-		spec.BackoffLimit = int32Ptr(1)
+		spec.BackoffLimit = defaultJobBackoffLimit()
 	}
 	if spec.TTLSecondsAfterFinished == nil {
 		spec.TTLSecondsAfterFinished = defaultJobTTLSeconds()
@@ -362,9 +362,9 @@ func buildBackupCronJob(
 					Annotations: copyStringMap(annotations),
 				},
 				Spec: batchv1.JobSpec{
-					BackoffLimit: int32Ptr(1),
-					Parallelism:  int32Ptr(1),
-					Completions:  int32Ptr(1),
+					BackoffLimit:         defaultJobBackoffLimit(),
+					Parallelism:          int32Ptr(1),
+					Completions:          int32Ptr(1),
 					PodReplacementPolicy: podReplacementPolicyPtr(batchv1.Failed),
 					Template: corev1.PodTemplateSpec{
 						ObjectMeta: metav1.ObjectMeta{
