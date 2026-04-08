@@ -106,6 +106,13 @@ BackupPolicy
 - `Job` 只负责真正的数据动作，控制器不需要把执行态塞进内存
 - 后续要做暂停、补跑、重试、观测时，这个模型更稳定
 
+补充说明：
+
+- `CronJob.spec.concurrencyPolicy` 只约束 trigger Job
+- operator 现在会在 `trigger-backup-run` 阶段继续把 `Allow / Forbid / Replace` 落到 `BackupRun` 层
+- `Forbid` 会在已有活跃 `BackupRun` 时跳过本次调度
+- `Replace` 会先删除活跃 `BackupRun`，再创建新的调度执行
+
 ## MySQL 当前能力
 
 当前 MySQL 是第一条已经跑通的数据面能力，代码在 [`controllers/mysql_runtime.go`](/C:/Users/admin/Desktop/release/dataprotection/controllers/mysql_runtime.go)。
@@ -322,7 +329,7 @@ spec:
 这个触发身份只负责两件事：
 
 - `get` 自己对应的 `BackupPolicy`
-- `create` `BackupRun`
+- `create/list/delete` `BackupRun`
 
 这意味着：
 
@@ -371,6 +378,15 @@ spec:
 - 两个 `Running` 的备份 Pod
 
 这是正常现象，说明调度触发和真正数据执行是分层的。
+
+## Job 历史治理
+
+为了避免 `kubectl get job/pod -A` 被历史任务刷屏，当前默认行为已经收紧：
+
+- trigger `CronJob` 只保留 `1` 条成功历史和 `1` 条失败历史
+- 真正的备份/恢复 `Job` 默认带 `ttlSecondsAfterFinished=86400`
+
+如果你希望保留更久或更短，可以通过 `spec.execution.ttlSecondsAfterFinished` 覆盖。
 
 ## 常用观察命令
 

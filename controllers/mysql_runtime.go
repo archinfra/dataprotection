@@ -771,6 +771,9 @@ func defaultMySQLExecutionTemplate(spec dpv1alpha1.ExecutionTemplateSpec) dpv1al
 	if spec.BackoffLimit == nil {
 		spec.BackoffLimit = int32Ptr(1)
 	}
+	if spec.TTLSecondsAfterFinished == nil {
+		spec.TTLSecondsAfterFinished = defaultJobTTLSeconds()
+	}
 	return spec
 }
 

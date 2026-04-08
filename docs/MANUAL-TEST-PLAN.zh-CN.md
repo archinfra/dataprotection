@@ -18,6 +18,8 @@
 7. `RestoreRequest` 能按 `snapshotRef` 恢复
 8. S3/MinIO 缺 bucket 时能自动创建
 9. NFS 场景能正常写入和恢复
+10. `Forbid / Replace` 并发策略真正作用到 `BackupRun`
+11. 完成后的历史 `Job` 能按 TTL 自动收敛
 
 ## 推荐测试命名
 
@@ -308,6 +310,11 @@ kubectl logs -n backup-system <pod-name> -c s3-download
 - trigger Pod 完成后生成一个新的 `BackupRun`
 - `BackupRun` 再生成真正的数据 `Job`
 
+补充检查：
+
+- 如果 policy 是 `Forbid`，当上一次 `BackupRun` 仍处于 `Pending/Running` 时，新一轮调度不应再创建新的 `BackupRun`
+- 如果 policy 是 `Replace`，新一轮调度前会先删除旧的活跃 `BackupRun`
+
 ### E. 为什么会出现多个 Pod / 容器
 
 如果是“定时 + S3 / MinIO”，常见现象是：
@@ -328,7 +335,20 @@ kubectl logs -n backup-system <pod-name> -c s3-download
 
 这不是重复执行，而是调度层和数据层分离后的正常结果。
 
-### F. 恢复
+### F. Job 历史收敛
+
+做法：
+
+- 跑完一次手工或定时备份
+- 观察 `Job` 上是否带 `ttlSecondsAfterFinished`
+
+预期：
+
+- trigger `CronJob` 历史条数较少
+- 真正的数据 `Job` 默认带 `ttlSecondsAfterFinished=86400`
+- 超过 TTL 后，`Job/Pod` 会被 Kubernetes 自动清理
+
+### G. 恢复
 
 做法：
 

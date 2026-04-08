@@ -36,7 +36,7 @@ func buildTriggerPolicyRules(policyName string) []rbacv1.PolicyRule {
 		{
 			APIGroups: []string{"dataprotection.archinfra.io"},
 			Resources: []string{"backupruns"},
-			Verbs:     []string{"create"},
+			Verbs:     []string{"create", "list", "delete"},
 		},
 	}
 }

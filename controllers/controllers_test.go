@@ -75,6 +75,12 @@ func TestBackupPolicyReconcileCreatesCronJobsPerStorage(t *testing.T) {
 		if err := fakeClient.Get(ctx, types.NamespacedName{Namespace: policy.Namespace, Name: cronJobName}, &cronJob); err != nil {
 			t.Fatalf("expected cronjob %s: %v", cronJobName, err)
 		}
+		if cronJob.Spec.SuccessfulJobsHistoryLimit == nil || *cronJob.Spec.SuccessfulJobsHistoryLimit != 1 {
+			t.Fatalf("expected trigger success history limit 1 for cronjob %s", cronJobName)
+		}
+		if cronJob.Spec.FailedJobsHistoryLimit == nil || *cronJob.Spec.FailedJobsHistoryLimit != 1 {
+			t.Fatalf("expected trigger failed history limit 1 for cronjob %s", cronJobName)
+		}
 		if cronJob.Spec.JobTemplate.Spec.Template.Spec.ServiceAccountName != triggerServiceAccount {
 			t.Fatalf("expected trigger service account %s for cronjob %s, got %s", triggerServiceAccount, cronJobName, cronJob.Spec.JobTemplate.Spec.Template.Spec.ServiceAccountName)
 		}
@@ -131,6 +137,9 @@ func TestBackupRunReconcileCreatesJobsAndSnapshotsPerStorage(t *testing.T) {
 		var job batchv1.Job
 		if err := fakeClient.Get(ctx, types.NamespacedName{Namespace: run.Namespace, Name: jobName}, &job); err != nil {
 			t.Fatalf("expected job %s: %v", jobName, err)
+		}
+		if job.Spec.TTLSecondsAfterFinished == nil || *job.Spec.TTLSecondsAfterFinished != 86400 {
+			t.Fatalf("expected default ttlSecondsAfterFinished 86400 for job %s", jobName)
 		}
 		job.Status.Succeeded = 1
 		job.Status.Conditions = []batchv1.JobCondition{{

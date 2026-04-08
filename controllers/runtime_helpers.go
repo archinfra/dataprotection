@@ -285,6 +285,9 @@ func defaultExecutionTemplate(spec dpv1alpha1.ExecutionTemplateSpec) dpv1alpha1.
 	if spec.BackoffLimit == nil {
 		spec.BackoffLimit = int32Ptr(1)
 	}
+	if spec.TTLSecondsAfterFinished == nil {
+		spec.TTLSecondsAfterFinished = defaultJobTTLSeconds()
+	}
 	return spec
 }
 
@@ -316,8 +319,8 @@ func buildBackupCronJob(
 			Suspend:                    boolPtr(suspended),
 			ConcurrencyPolicy:          policy.Spec.EffectiveConcurrencyPolicy(),
 			StartingDeadlineSeconds:    cloneInt64Ptr(policy.Spec.Schedule.StartingDeadlineSeconds),
-			SuccessfulJobsHistoryLimit: int32Ptr(3),
-			FailedJobsHistoryLimit:     int32Ptr(3),
+			SuccessfulJobsHistoryLimit: defaultCronJobSuccessfulHistoryLimit(),
+			FailedJobsHistoryLimit:     defaultCronJobFailedHistoryLimit(),
 			JobTemplate: batchv1.JobTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels:      copyStringMap(labels),
