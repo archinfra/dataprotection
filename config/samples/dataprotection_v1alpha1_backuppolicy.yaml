@@ -1,24 +1,18 @@
 apiVersion: dataprotection.archinfra.io/v1alpha1
 kind: BackupPolicy
 metadata:
-  name: mysql-prod-daily
+  name: mysql-prod-every-3m
   namespace: backup-system
 spec:
   sourceRef:
     name: mysql-prod
-  # One policy can fan out to multiple reusable storages.
   storageRefs:
     - name: minio-primary
-    - name: nfs-secondary
+    - name: nfs-primary
   schedule:
-    cron: "0 2 * * *"
+    cron: "*/3 * * * *"
     concurrencyPolicy: Forbid
-  # Prefer a reusable RetentionPolicy for long-term governance.
-  retentionPolicyRef:
-    name: mysql-daily-retention
-  # Inline retention is still convenient for quick smoke tests.
-  retention:
-    keepLast: 7
-  verification:
-    enabled: true
-    mode: Metadata
+  retentionRef:
+    name: keep-last-3
+  notificationRefs:
+    - name: ops-webhook

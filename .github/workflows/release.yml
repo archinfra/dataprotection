@@ -22,12 +22,8 @@ jobs:
       aliyun_registry: ${{ steps.meta.outputs.aliyun_registry }}
       aliyun_namespace: ${{ steps.meta.outputs.aliyun_namespace }}
       operator_tags: ${{ steps.meta.outputs.operator_tags }}
-      mysql_dockerhub: ${{ steps.meta.outputs.mysql_dockerhub }}
-      mysql_aliyun: ${{ steps.meta.outputs.mysql_aliyun }}
       mc_dockerhub: ${{ steps.meta.outputs.mc_dockerhub }}
       mc_aliyun: ${{ steps.meta.outputs.mc_aliyun }}
-      redis_dockerhub: ${{ steps.meta.outputs.redis_dockerhub }}
-      redis_aliyun: ${{ steps.meta.outputs.redis_aliyun }}
       busybox_dockerhub: ${{ steps.meta.outputs.busybox_dockerhub }}
       busybox_aliyun: ${{ steps.meta.outputs.busybox_aliyun }}
     steps:
@@ -96,25 +92,17 @@ jobs:
             echo "aliyun_registry=${aliyun_registry}"
             echo "aliyun_namespace=${aliyun_namespace}"
             if [[ "${publish_dockerhub}" == "true" ]]; then
-              echo "mysql_dockerhub=docker.io/${dockerhub_namespace}/dataprotection-mysql:8.0.45"
               echo "mc_dockerhub=docker.io/${dockerhub_namespace}/dataprotection-minio-mc:latest"
-              echo "redis_dockerhub=docker.io/${dockerhub_namespace}/dataprotection-redis:7.2.7-alpine"
               echo "busybox_dockerhub=docker.io/${dockerhub_namespace}/dataprotection-busybox:v1"
             else
-              echo "mysql_dockerhub="
               echo "mc_dockerhub="
-              echo "redis_dockerhub="
               echo "busybox_dockerhub="
             fi
             if [[ "${publish_aliyun}" == "true" ]]; then
-              echo "mysql_aliyun=${aliyun_registry}/${aliyun_namespace}/dataprotection-mysql:8.0.45"
               echo "mc_aliyun=${aliyun_registry}/${aliyun_namespace}/dataprotection-minio-mc:latest"
-              echo "redis_aliyun=${aliyun_registry}/${aliyun_namespace}/dataprotection-redis:7.2.7-alpine"
               echo "busybox_aliyun=${aliyun_registry}/${aliyun_namespace}/dataprotection-busybox:v1"
             else
-              echo "mysql_aliyun="
               echo "mc_aliyun="
-              echo "redis_aliyun="
               echo "busybox_aliyun="
             fi
             echo "operator_tags<<EOF"
@@ -220,12 +208,8 @@ jobs:
       - name: Mirror runtime images
         shell: bash
         env:
-          MYSQL_DOCKERHUB: ${{ needs.prepare.outputs.mysql_dockerhub }}
-          MYSQL_ALIYUN: ${{ needs.prepare.outputs.mysql_aliyun }}
           MC_DOCKERHUB: ${{ needs.prepare.outputs.mc_dockerhub }}
           MC_ALIYUN: ${{ needs.prepare.outputs.mc_aliyun }}
-          REDIS_DOCKERHUB: ${{ needs.prepare.outputs.redis_dockerhub }}
-          REDIS_ALIYUN: ${{ needs.prepare.outputs.redis_aliyun }}
           BUSYBOX_DOCKERHUB: ${{ needs.prepare.outputs.busybox_dockerhub }}
           BUSYBOX_ALIYUN: ${{ needs.prepare.outputs.busybox_aliyun }}
         run: |
@@ -244,9 +228,7 @@ jobs:
             fi
           }
 
-          create_aliases "public.ecr.aws/docker/library/mysql:8.0.45" "${MYSQL_DOCKERHUB}" "${MYSQL_ALIYUN}"
           create_aliases "minio/mc:latest" "${MC_DOCKERHUB}" "${MC_ALIYUN}"
-          create_aliases "redis:7.2.7-alpine" "${REDIS_DOCKERHUB}" "${REDIS_ALIYUN}"
           create_aliases "registry.cn-beijing.aliyuncs.com/kube4/busybox:v1" "${BUSYBOX_DOCKERHUB}" "${BUSYBOX_ALIYUN}"
 
   build-installers:

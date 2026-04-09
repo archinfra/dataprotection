@@ -1,0 +1,9 @@
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: NotificationEndpoint
+metadata:
+  name: ops-webhook
+  namespace: backup-system
+spec:
+  url: https://example.com/hooks/data-protection
+  method: POST
+  timeoutSeconds: 10

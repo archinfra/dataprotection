@@ -1,0 +1,13 @@
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: RestoreJob
+metadata:
+  name: mysql-smoke-restore
+  namespace: backup-system
+spec:
+  sourceRef:
+    name: mysql-smoke
+  snapshotRef:
+    name: mysql-smoke-manual-nfs-nfs-primary-snapshot
+  notificationRefs:
+    - name: ops-webhook
+  reason: restore validated smoke snapshot

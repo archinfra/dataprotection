@@ -5,45 +5,35 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	dpv1alpha1 "github.com/archinfra/dataprotection/api/v1alpha1"
 )
 
 type RetentionPolicyReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
 }
 
 func (r *RetentionPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx).WithValues("retentionPolicy", req.NamespacedName.String())
-
-	var retentionPolicy dpv1alpha1.RetentionPolicy
-	if err := r.Get(ctx, req.NamespacedName, &retentionPolicy); err != nil {
-		if apierrors.IsNotFound(err) {
-			return ctrl.Result{}, nil
-		}
-		return ctrl.Result{}, err
+	var policy dpv1alpha1.RetentionPolicy
+	if err := r.Get(ctx, req.NamespacedName, &policy); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	original := retentionPolicy.DeepCopy()
-	retentionPolicy.Status.ObservedGeneration = retentionPolicy.Generation
-
-	if err := retentionPolicy.Spec.ValidateBasic(); err != nil {
-		retentionPolicy.Status.Phase = dpv1alpha1.ResourcePhaseFailed
-		retentionPolicy.Status.Message = err.Error()
-		markCondition(&retentionPolicy.Status.Conditions, "Ready", metav1.ConditionFalse, "InvalidSpec", err.Error(), retentionPolicy.Generation)
+	base := policy.DeepCopy()
+	policy.Status.ObservedGeneration = policy.Generation
+	if err := policy.Spec.ValidateBasic(); err != nil {
+		policy.Status.Phase = dpv1alpha1.ResourcePhaseFailed
+		policy.Status.Message = err.Error()
+		markCondition(&policy.Status.Conditions, "Ready", metav1.ConditionFalse, "InvalidSpec", policy.Status.Message, policy.Generation)
 	} else {
-		retentionPolicy.Status.Phase = dpv1alpha1.ResourcePhaseReady
-		retentionPolicy.Status.Message = "retention policy specification is valid"
-		markCondition(&retentionPolicy.Status.Conditions, "Ready", metav1.ConditionTrue, "Validated", "retention policy specification is valid", retentionPolicy.Generation)
+		policy.Status.Phase = dpv1alpha1.ResourcePhaseConfigured
+		policy.Status.Message = "retention policy is configured"
+		markCondition(&policy.Status.Conditions, "Ready", metav1.ConditionTrue, "Configured", policy.Status.Message, policy.Generation)
 	}
 
-	if err := r.Status().Patch(ctx, &retentionPolicy, client.MergeFrom(original)); err != nil {
-		logger.Error(err, "unable to patch RetentionPolicy status")
+	if err := r.Status().Patch(ctx, &policy, client.MergeFrom(base)); err != nil && !apierrors.IsNotFound(err) {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil

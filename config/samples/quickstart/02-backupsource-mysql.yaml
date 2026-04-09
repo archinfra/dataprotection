@@ -1,0 +1,15 @@
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: BackupSource
+metadata:
+  name: mysql-smoke
+  namespace: backup-system
+spec:
+  addonRef:
+    name: mysql-dump
+  endpoint:
+    host: mysql-0.mysql.aict.svc.cluster.local
+    port: 3306
+    username: root
+    passwordFrom:
+      name: mysql-runtime-auth
+      key: password

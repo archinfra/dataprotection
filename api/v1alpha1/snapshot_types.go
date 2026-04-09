@@ -6,14 +6,16 @@ import (
 )
 
 type SnapshotSpec struct {
-	SourceRef    corev1.LocalObjectReference `json:"sourceRef"`
-	BackupRunRef corev1.LocalObjectReference `json:"backupRunRef"`
-	// StorageRef tells us which backend owns this snapshot artifact.
-	StorageRef corev1.LocalObjectReference `json:"storageRef"`
-	// StoragePath records the effective backend path used during backup.
-	StoragePath string       `json:"storagePath,omitempty"`
-	Driver      BackupDriver `json:"driver"`
-	Snapshot    string       `json:"snapshot"`
+	Series        string                       `json:"series"`
+	SourceRef     corev1.LocalObjectReference  `json:"sourceRef"`
+	StorageRef    corev1.LocalObjectReference  `json:"storageRef"`
+	PolicyRef     *corev1.LocalObjectReference `json:"policyRef,omitempty"`
+	BackupJobRef  *corev1.LocalObjectReference `json:"backupJobRef,omitempty"`
+	NativeJobName string                       `json:"nativeJobName,omitempty"`
+	BackendPath   string                       `json:"backendPath"`
+	Snapshot      string                       `json:"snapshot"`
+	Checksum      string                       `json:"checksum,omitempty"`
+	Size          int64                        `json:"size,omitempty"`
 }
 
 type SnapshotStatus struct {
@@ -35,8 +37,8 @@ type SnapshotStatus struct {
 // +kubebuilder:printcolumn:name="Source",type=string,JSONPath=`.spec.sourceRef.name`
 // +kubebuilder:printcolumn:name="Storage",type=string,JSONPath=`.spec.storageRef.name`
 // +kubebuilder:printcolumn:name="Completed",type=date,JSONPath=`.status.completedAt`
-// +kubebuilder:printcolumn:name="Snapshot",type=string,priority=1,JSONPath=`.spec.snapshot`
-// +kubebuilder:printcolumn:name="Message",type=string,JSONPath=`.status.message`
+// +kubebuilder:printcolumn:name="Snapshot",type=string,JSONPath=`.spec.snapshot`
+// +kubebuilder:printcolumn:name="Message",type=string,priority=1,JSONPath=`.status.message`
 // +kubebuilder:resource:shortName=snap;sn
 type Snapshot struct {
 	metav1.TypeMeta   `json:",inline"`

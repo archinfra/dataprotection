@@ -20,15 +20,12 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
-    - jsonPath: .spec.successfulSnapshots.last
-      name: SuccessKeep
+    - jsonPath: .spec.successfulSnapshots.keepLast
+      name: KeepSuccess
       type: integer
-    - jsonPath: .spec.failedSnapshots.last
-      name: FailedKeep
+    - jsonPath: .spec.failedExecutions.keepLast
+      name: KeepFailed
       type: integer
-    - jsonPath: .spec.default
-      name: Default
-      type: boolean
     - jsonPath: .status.message
       name: Message
       priority: 1
@@ -56,19 +53,15 @@ spec:
             type: object
           spec:
             properties:
-              default:
-                type: boolean
-              failedSnapshots:
+              failedExecutions:
                 properties:
-                  last:
+                  keepLast:
                     format: int32
                     type: integer
                 type: object
-              maxRetentionPeriod:
-                type: string
               successfulSnapshots:
                 properties:
-                  last:
+                  keepLast:
                     format: int32
                     type: integer
                 type: object
@@ -137,7 +130,6 @@ spec:
                 format: int64
                 type: integer
               phase:
-                description: ResourcePhase 定义资源当前的生命周期阶段
                 type: string
             type: object
         type: object

@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -9,8 +10,10 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -37,8 +40,8 @@ func markCondition(conditions *[]metav1.Condition, conditionType string, status 
 
 func phaseMessage(phase dpv1alpha1.ResourcePhase) string {
 	switch phase {
-	case dpv1alpha1.ResourcePhaseReady:
-		return "resource is ready"
+	case dpv1alpha1.ResourcePhaseConfigured:
+		return "resource specification is configured"
 	case dpv1alpha1.ResourcePhaseRunning:
 		return "resource is actively running"
 	case dpv1alpha1.ResourcePhaseSucceeded:
@@ -56,42 +59,6 @@ func requeueSoon() ctrl.Result {
 	return ctrl.Result{RequeueAfter: 30 * time.Second}
 }
 
-func resolveKeepLastRetention(ctx context.Context, c client.Client, namespace string, inline dpv1alpha1.RetentionRule, refName string) (int32, *dpv1alpha1.RetentionPolicy, error) {
-	keepLast := retentionValue(inline)
-	refName = trimString(refName)
-	if refName == "" {
-		return keepLast, nil, nil
-	}
-
-	retentionPolicy, err := getRetentionPolicy(ctx, c, namespace, refName)
-	if err != nil {
-		return 0, nil, err
-	}
-	if err := retentionPolicy.Spec.ValidateBasic(); err != nil {
-		return 0, retentionPolicy, newPermanentDependencyError("referenced RetentionPolicy %q is invalid: %v", retentionPolicy.Name, err)
-	}
-	if retentionPolicy.Spec.SuccessfulSnapshots.Last > 0 {
-		keepLast = retentionPolicy.Spec.SuccessfulSnapshots.Last
-	}
-	return keepLast, retentionPolicy, nil
-}
-
-func resolveFailedRetention(ctx context.Context, c client.Client, namespace, refName string) (int32, *dpv1alpha1.RetentionPolicy, error) {
-	refName = trimString(refName)
-	if refName == "" {
-		return 0, nil, nil
-	}
-
-	retentionPolicy, err := getRetentionPolicy(ctx, c, namespace, refName)
-	if err != nil {
-		return 0, nil, err
-	}
-	if err := retentionPolicy.Spec.ValidateBasic(); err != nil {
-		return 0, retentionPolicy, newPermanentDependencyError("referenced RetentionPolicy %q is invalid: %v", retentionPolicy.Name, err)
-	}
-	return retentionPolicy.Spec.FailedSnapshots.Last, retentionPolicy, nil
-}
-
 func trimString(value string) string {
 	return strings.TrimSpace(value)
 }
@@ -103,14 +70,103 @@ func localRefName(ref *corev1.LocalObjectReference) string {
 	return trimString(ref.Name)
 }
 
-func snapshotSortTime(snapshot *dpv1alpha1.Snapshot) time.Time {
-	if snapshot.Status.CompletedAt != nil {
-		return snapshot.Status.CompletedAt.Time
+func createOrUpdateWithRetry(ctx context.Context, c client.Client, obj client.Object, mutateFn controllerutil.MutateFn) error {
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		_, err := controllerutil.CreateOrUpdate(ctx, c, obj, mutateFn)
+		return err
+	})
+}
+
+func deleteInBackground(ctx context.Context, c client.Client, obj client.Object) error {
+	policy := metav1.DeletePropagationBackground
+	return c.Delete(ctx, obj, client.PropagationPolicy(policy))
+}
+
+func getBackupAddon(ctx context.Context, c client.Client, name string) (*dpv1alpha1.BackupAddon, error) {
+	var addon dpv1alpha1.BackupAddon
+	if err := c.Get(ctx, types.NamespacedName{Name: name}, &addon); err != nil {
+		return nil, err
 	}
-	if snapshot.Status.StartedAt != nil {
-		return snapshot.Status.StartedAt.Time
+	return &addon, nil
+}
+
+func getBackupSource(ctx context.Context, c client.Client, namespace, name string) (*dpv1alpha1.BackupSource, error) {
+	var source dpv1alpha1.BackupSource
+	if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &source); err != nil {
+		return nil, err
 	}
-	return snapshot.CreationTimestamp.Time
+	return &source, nil
+}
+
+func getBackupStorage(ctx context.Context, c client.Client, namespace, name string) (*dpv1alpha1.BackupStorage, error) {
+	var storage dpv1alpha1.BackupStorage
+	if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &storage); err != nil {
+		return nil, err
+	}
+	return &storage, nil
+}
+
+func getBackupPolicy(ctx context.Context, c client.Client, namespace, name string) (*dpv1alpha1.BackupPolicy, error) {
+	var policy dpv1alpha1.BackupPolicy
+	if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &policy); err != nil {
+		return nil, err
+	}
+	return &policy, nil
+}
+
+func getRetentionPolicy(ctx context.Context, c client.Client, namespace, name string) (*dpv1alpha1.RetentionPolicy, error) {
+	var retention dpv1alpha1.RetentionPolicy
+	if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &retention); err != nil {
+		return nil, err
+	}
+	return &retention, nil
+}
+
+func getSnapshot(ctx context.Context, c client.Client, namespace, name string) (*dpv1alpha1.Snapshot, error) {
+	var snapshot dpv1alpha1.Snapshot
+	if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &snapshot); err != nil {
+		return nil, err
+	}
+	return &snapshot, nil
+}
+
+func getNotificationEndpoint(ctx context.Context, c client.Client, namespace, name string) (*dpv1alpha1.NotificationEndpoint, error) {
+	var endpoint dpv1alpha1.NotificationEndpoint
+	if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &endpoint); err != nil {
+		return nil, err
+	}
+	return &endpoint, nil
+}
+
+func effectiveSuccessfulKeepLast(policy *dpv1alpha1.RetentionPolicy) int32 {
+	value := int32(3)
+	if policy == nil {
+		return value
+	}
+	if policy.Spec.SuccessfulSnapshots.KeepLast > 0 {
+		return policy.Spec.SuccessfulSnapshots.KeepLast
+	}
+	return value
+}
+
+func effectiveFailedKeepLast(policy *dpv1alpha1.RetentionPolicy) int32 {
+	value := int32(1)
+	if policy == nil {
+		return value
+	}
+	if policy.Spec.FailedExecutions.KeepLast > 0 {
+		return policy.Spec.FailedExecutions.KeepLast
+	}
+	return value
+}
+
+func hasOwnerRef(obj metav1.Object, kind, name string) bool {
+	for _, owner := range obj.GetOwnerReferences() {
+		if owner.Kind == kind && owner.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func sortSnapshotsNewestFirst(items []*dpv1alpha1.Snapshot) {
@@ -124,65 +180,69 @@ func sortSnapshotsNewestFirst(items []*dpv1alpha1.Snapshot) {
 	})
 }
 
-func backupRunSortTime(run *dpv1alpha1.BackupRun) time.Time {
-	if run.Status.CompletedAt != nil {
-		return run.Status.CompletedAt.Time
+func snapshotSortTime(snapshot *dpv1alpha1.Snapshot) time.Time {
+	if snapshot.Status.CompletedAt != nil {
+		return snapshot.Status.CompletedAt.Time
 	}
-	if run.Status.StartedAt != nil {
-		return run.Status.StartedAt.Time
+	if snapshot.Status.StartedAt != nil {
+		return snapshot.Status.StartedAt.Time
 	}
-	return run.CreationTimestamp.Time
+	return snapshot.CreationTimestamp.Time
 }
 
-func sortBackupRunsNewestFirst(items []*dpv1alpha1.BackupRun) {
-	sort.SliceStable(items, func(i, j int) bool {
-		left := backupRunSortTime(items[i])
-		right := backupRunSortTime(items[j])
-		if left.Equal(right) {
-			return items[i].Name > items[j].Name
+func notificationRefNames(refs []corev1.LocalObjectReference) string {
+	names := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if name := trimString(ref.Name); name != "" {
+			names = append(names, name)
 		}
-		return left.After(right)
-	})
-}
-
-func createOrUpdateWithRetry(
-	ctx context.Context,
-	c client.Client,
-	obj client.Object,
-	mutateFn controllerutil.MutateFn,
-) error {
-	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		_, err := controllerutil.CreateOrUpdate(ctx, c, obj, mutateFn)
-		return err
-	})
-}
-
-func deleteInBackground(ctx context.Context, c client.Client, obj client.Object) error {
-	policy := metav1.DeletePropagationBackground
-	return c.Delete(ctx, obj, client.PropagationPolicy(policy))
-}
-
-func isTerminalBackupRun(phase dpv1alpha1.ResourcePhase) bool {
-	switch phase {
-	case dpv1alpha1.ResourcePhaseSucceeded, dpv1alpha1.ResourcePhaseFailed:
-		return true
-	default:
-		return false
 	}
+	sort.Strings(names)
+	return strings.Join(names, ",")
 }
 
-func describeLatestJobPodFailure(ctx context.Context, reader client.Reader, job *batchv1.Job) string {
+type podExecutionSummary struct {
+	StorageProbe *storageProbeSummary `json:"storageProbe,omitempty"`
+	Artifact     *artifactSummary     `json:"artifact,omitempty"`
+	Message      string               `json:"message,omitempty"`
+}
+
+type storageProbeSummary struct {
+	Result  dpv1alpha1.ProbeResult `json:"result,omitempty"`
+	Message string                 `json:"message,omitempty"`
+}
+
+type artifactSummary struct {
+	Snapshot    string `json:"snapshot,omitempty"`
+	BackendPath string `json:"backendPath,omitempty"`
+	Checksum    string `json:"checksum,omitempty"`
+	Size        int64  `json:"size,omitempty"`
+	CompletedAt string `json:"completedAt,omitempty"`
+}
+
+func parseJSONTerminationMessage(message string) (*podExecutionSummary, error) {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return nil, nil
+	}
+	var summary podExecutionSummary
+	if err := json.Unmarshal([]byte(message), &summary); err != nil {
+		return nil, err
+	}
+	return &summary, nil
+}
+
+func findLatestJobPod(ctx context.Context, reader client.Reader, job *batchv1.Job) (*corev1.Pod, error) {
 	var podList corev1.PodList
 	if err := reader.List(ctx, &podList,
 		client.InNamespace(job.Namespace),
 		client.MatchingLabels{"job-name": job.Name},
 	); err != nil {
-		return ""
+		return nil, err
 	}
 	if len(podList.Items) == 0 {
-		return ""
+		return nil, apierrors.NewNotFound(corev1.Resource("pods"), job.Name)
 	}
-
 	sort.SliceStable(podList.Items, func(i, j int) bool {
 		left := podList.Items[i].CreationTimestamp.Time
 		right := podList.Items[j].CreationTimestamp.Time
@@ -191,14 +251,16 @@ func describeLatestJobPodFailure(ctx context.Context, reader client.Reader, job 
 		}
 		return left.After(right)
 	})
-	latest := &podList.Items[0]
+	return &podList.Items[0], nil
+}
 
-	failures := collectContainerFailures(latest.Status.InitContainerStatuses, true)
-	failures = append(failures, collectContainerFailures(latest.Status.ContainerStatuses, false)...)
+func latestContainerFailureMessage(pod *corev1.Pod) string {
+	failures := collectContainerFailures(pod.Status.InitContainerStatuses, true)
+	failures = append(failures, collectContainerFailures(pod.Status.ContainerStatuses, false)...)
 	if len(failures) == 0 {
-		return fmt.Sprintf("latest pod %s phase=%s", latest.Name, latest.Status.Phase)
+		return fmt.Sprintf("latest pod %s phase=%s", pod.Name, pod.Status.Phase)
 	}
-	return fmt.Sprintf("latest pod %s: %s", latest.Name, strings.Join(failures, "; "))
+	return fmt.Sprintf("latest pod %s: %s", pod.Name, strings.Join(failures, "; "))
 }
 
 func collectContainerFailures(statuses []corev1.ContainerStatus, init bool) []string {

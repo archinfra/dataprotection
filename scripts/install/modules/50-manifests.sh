@@ -1,34 +1,22 @@
 render_install_manifest() {
   local output_file="$1"
   local operator_image
-  local mysql_runner_image
-  local redis_runner_image
-  local minio_runner_image
-  local s3_helper_image
-  local placeholder_runner_image
+  local utility_image
+  local minio_helper_image
 
   operator_image="$(operator_image_ref)"
-  mysql_runner_image="$(mysql_runner_image_ref)"
-  redis_runner_image="$(redis_runner_image_ref)"
-  minio_runner_image="$(minio_runner_image_ref)"
-  s3_helper_image="$(s3_helper_image_ref)"
-  placeholder_runner_image="$(placeholder_runner_image_ref)"
+  utility_image="$(utility_image_ref)"
+  minio_helper_image="$(minio_helper_image_ref)"
 
   [[ -n "${operator_image}" ]] || die "operator image ref is empty"
-  [[ -n "${mysql_runner_image}" ]] || die "mysql runner image ref is empty"
-  [[ -n "${redis_runner_image}" ]] || die "redis runner image ref is empty"
-  [[ -n "${minio_runner_image}" ]] || die "minio runner image ref is empty"
-  [[ -n "${s3_helper_image}" ]] || die "s3 helper image ref is empty"
-  [[ -n "${placeholder_runner_image}" ]] || die "placeholder runner image ref is empty"
+  [[ -n "${utility_image}" ]] || die "utility image ref is empty"
+  [[ -n "${minio_helper_image}" ]] || die "minio helper image ref is empty"
 
   sed \
     -e "s|{{NAMESPACE}}|${NAMESPACE}|g" \
     -e "s|{{OPERATOR_IMAGE}}|${operator_image}|g" \
-    -e "s|{{MYSQL_RUNNER_IMAGE}}|${mysql_runner_image}|g" \
-    -e "s|{{REDIS_RUNNER_IMAGE}}|${redis_runner_image}|g" \
-    -e "s|{{MINIO_RUNNER_IMAGE}}|${minio_runner_image}|g" \
-    -e "s|{{S3_HELPER_IMAGE}}|${s3_helper_image}|g" \
-    -e "s|{{PLACEHOLDER_RUNNER_IMAGE}}|${placeholder_runner_image}|g" \
+    -e "s|{{UTILITY_IMAGE}}|${utility_image}|g" \
+    -e "s|{{MINIO_HELPER_IMAGE}}|${minio_helper_image}|g" \
     -e "s|{{IMAGE_PULL_POLICY}}|${IMAGE_PULL_POLICY}|g" \
     "${INSTALL_TEMPLATE}" > "${output_file}"
 }

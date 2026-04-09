@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -9,37 +10,42 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-func (s *BackupSourceSpec) ValidateBasic() error {
-	if strings.TrimSpace(string(s.Driver)) == "" {
-		return fmt.Errorf("spec.driver is required")
+func (s *BackupAddonSpec) ValidateBasic() error {
+	if err := s.BackupTemplate.ValidateBasic("spec.backupTemplate"); err != nil {
+		return err
 	}
-	switch s.Driver {
-	case BackupDriverMySQL, BackupDriverRedis, BackupDriverMongoDB, BackupDriverMinIO, BackupDriverRabbitMQ, BackupDriverMilvus:
-	default:
-		return fmt.Errorf("unsupported spec.driver %q", s.Driver)
+	if s.RestoreTemplate != nil {
+		if err := s.RestoreTemplate.ValidateBasic("spec.restoreTemplate"); err != nil {
+			return err
+		}
 	}
+	if hasDuplicateAddonParameters(s.Parameters) {
+		return fmt.Errorf("spec.parameters contains duplicate names")
+	}
+	return nil
+}
 
+func (s *AddonTemplateSpec) ValidateBasic(field string) error {
+	if strings.TrimSpace(s.Image) == "" {
+		return fmt.Errorf("%s.image is required", field)
+	}
+	return nil
+}
+
+func (s *BackupSourceSpec) ValidateBasic() error {
+	if strings.TrimSpace(s.AddonRef.Name) == "" {
+		return fmt.Errorf("spec.addonRef.name is required")
+	}
 	if s.TargetRef == nil && strings.TrimSpace(s.Endpoint.Host) == "" && s.Endpoint.ServiceRef == nil {
 		return fmt.Errorf("spec.targetRef or spec.endpoint.host/serviceRef is required")
 	}
-	if err := validateMySQLDriverConfig(s.DriverConfig.MySQL); err != nil {
-		return err
+	if hasDuplicateSecretParameterRefs(s.SecretRefs) {
+		return fmt.Errorf("spec.secretRefs contains duplicate names")
 	}
-	if err := validateRedisDriverConfig(s.DriverConfig.Redis); err != nil {
-		return err
-	}
-	if err := validateMinIODriverConfig(s.DriverConfig.MinIO); err != nil {
-		return err
-	}
-
 	return nil
 }
 
 func (s *BackupStorageSpec) ValidateBasic() error {
-	if strings.TrimSpace(string(s.Type)) == "" {
-		return fmt.Errorf("spec.type is required")
-	}
-
 	switch s.Type {
 	case StorageTypeNFS:
 		if s.NFS == nil {
@@ -48,17 +54,16 @@ func (s *BackupStorageSpec) ValidateBasic() error {
 		if strings.TrimSpace(s.NFS.Server) == "" || strings.TrimSpace(s.NFS.Path) == "" {
 			return fmt.Errorf("spec.nfs.server and spec.nfs.path are required")
 		}
-	case StorageTypeS3:
-		if s.S3 == nil {
-			return fmt.Errorf("spec.s3 is required when spec.type=s3")
+	case StorageTypeMinIO:
+		if s.MinIO == nil {
+			return fmt.Errorf("spec.minio is required when spec.type=minio")
 		}
-		if strings.TrimSpace(s.S3.Endpoint) == "" || strings.TrimSpace(s.S3.Bucket) == "" {
-			return fmt.Errorf("spec.s3.endpoint and spec.s3.bucket are required")
+		if strings.TrimSpace(s.MinIO.Endpoint) == "" || strings.TrimSpace(s.MinIO.Bucket) == "" {
+			return fmt.Errorf("spec.minio.endpoint and spec.minio.bucket are required")
 		}
 	default:
-		return fmt.Errorf("unsupported storage type %q", s.Type)
+		return fmt.Errorf("unsupported spec.type %q", s.Type)
 	}
-
 	return nil
 }
 
@@ -66,102 +71,94 @@ func (s *BackupPolicySpec) ValidateBasic() error {
 	if strings.TrimSpace(s.SourceRef.Name) == "" {
 		return fmt.Errorf("spec.sourceRef.name is required")
 	}
-
 	if len(s.StorageRefs) == 0 {
 		return fmt.Errorf("spec.storageRefs requires at least one storage")
 	}
 	if hasDuplicateLocalObjectReferenceNames(s.StorageRefs) {
-		return fmt.Errorf("spec.storageRefs contains duplicate storage names")
+		return fmt.Errorf("spec.storageRefs contains duplicate names")
 	}
-	if s.RetentionPolicyRef != nil && strings.TrimSpace(s.RetentionPolicyRef.Name) == "" {
-		return fmt.Errorf("spec.retentionPolicyRef.name cannot be empty")
+	if s.RetentionRef != nil && strings.TrimSpace(s.RetentionRef.Name) == "" {
+		return fmt.Errorf("spec.retentionRef.name cannot be empty")
 	}
-
+	if hasDuplicateLocalObjectReferenceNames(s.NotificationRefs) {
+		return fmt.Errorf("spec.notificationRefs contains duplicate names")
+	}
 	if strings.TrimSpace(s.Schedule.Cron) == "" && !s.Suspend {
 		return fmt.Errorf("spec.schedule.cron is required unless the policy is suspended")
 	}
-	if err := validateMySQLDriverConfig(s.DriverConfig.MySQL); err != nil {
-		return err
-	}
-	if err := validateRedisDriverConfig(s.DriverConfig.Redis); err != nil {
-		return err
-	}
-	if err := validateMinIODriverConfig(s.DriverConfig.MinIO); err != nil {
-		return err
-	}
+	return s.JobRuntime.ValidateBasic()
+}
 
+func (s *BackupScheduleSpec) EffectiveConcurrencyPolicy() batchv1.ConcurrencyPolicy {
+	if strings.TrimSpace(string(s.ConcurrencyPolicy)) == "" {
+		return batchv1.ForbidConcurrent
+	}
+	return s.ConcurrencyPolicy
+}
+
+func (s *JobRuntimeSpec) ValidateBasic() error {
+	if s.TTLSecondsAfterFinished != nil && *s.TTLSecondsAfterFinished < 0 {
+		return fmt.Errorf("spec.jobRuntime.ttlSecondsAfterFinished cannot be negative")
+	}
 	return nil
+}
+
+func (s *BackupJobSpec) ValidateBasic() error {
+	if strings.TrimSpace(s.SourceRef.Name) == "" {
+		return fmt.Errorf("spec.sourceRef.name is required")
+	}
+	if strings.TrimSpace(s.StorageRef.Name) == "" {
+		return fmt.Errorf("spec.storageRef.name is required")
+	}
+	if s.RetentionRef != nil && strings.TrimSpace(s.RetentionRef.Name) == "" {
+		return fmt.Errorf("spec.retentionRef.name cannot be empty")
+	}
+	if hasDuplicateLocalObjectReferenceNames(s.NotificationRefs) {
+		return fmt.Errorf("spec.notificationRefs contains duplicate names")
+	}
+	return s.JobRuntime.ValidateBasic()
+}
+
+func (s *RestoreJobSpec) ValidateBasic() error {
+	if strings.TrimSpace(s.SourceRef.Name) == "" {
+		return fmt.Errorf("spec.sourceRef.name is required")
+	}
+	if strings.TrimSpace(s.SnapshotRef.Name) == "" {
+		return fmt.Errorf("spec.snapshotRef.name is required")
+	}
+	if hasDuplicateLocalObjectReferenceNames(s.NotificationRefs) {
+		return fmt.Errorf("spec.notificationRefs contains duplicate names")
+	}
+	if hasDuplicateSecretParameterRefs(s.SecretRefs) {
+		return fmt.Errorf("spec.secretRefs contains duplicate names")
+	}
+	return s.JobRuntime.ValidateBasic()
 }
 
 func (s *RetentionPolicySpec) ValidateBasic() error {
-	if s.SuccessfulSnapshots.Last < 0 {
-		return fmt.Errorf("spec.successfulSnapshots.last cannot be negative")
+	if s.SuccessfulSnapshots.KeepLast < 0 {
+		return fmt.Errorf("spec.successfulSnapshots.keepLast cannot be negative")
 	}
-	if s.FailedSnapshots.Last < 0 {
-		return fmt.Errorf("spec.failedSnapshots.last cannot be negative")
-	}
-	return nil
-}
-
-func (s *BackupRunSpec) ValidateBasic() error {
-	if strings.TrimSpace(s.SourceRef.Name) == "" {
-		return fmt.Errorf("spec.sourceRef.name is required")
-	}
-	if len(s.StorageRefs) == 0 && s.PolicyRef == nil {
-		return fmt.Errorf("spec.storageRefs or spec.policyRef is required")
-	}
-	if hasDuplicateLocalObjectReferenceNames(s.StorageRefs) {
-		return fmt.Errorf("spec.storageRefs contains duplicate storage names")
-	}
-	if err := validateMySQLDriverConfig(s.DriverConfig.MySQL); err != nil {
-		return err
-	}
-	if err := validateRedisDriverConfig(s.DriverConfig.Redis); err != nil {
-		return err
-	}
-	if err := validateMinIODriverConfig(s.DriverConfig.MinIO); err != nil {
-		return err
+	if s.FailedExecutions.KeepLast < 0 {
+		return fmt.Errorf("spec.failedExecutions.keepLast cannot be negative")
 	}
 	return nil
 }
 
-func (s *RestoreRequestSpec) ValidateBasic() error {
-	if strings.TrimSpace(s.SourceRef.Name) == "" {
-		return fmt.Errorf("spec.sourceRef.name is required")
+func (s *NotificationEndpointSpec) ValidateBasic() error {
+	if strings.TrimSpace(s.URL) == "" {
+		return fmt.Errorf("spec.url is required")
 	}
-	if s.BackupRunRef == nil && s.SnapshotRef == nil && strings.TrimSpace(s.Snapshot) == "" {
-		return fmt.Errorf("spec.backupRunRef, spec.snapshotRef or spec.snapshot is required")
+	if _, err := url.ParseRequestURI(strings.TrimSpace(s.URL)); err != nil {
+		return fmt.Errorf("spec.url is invalid: %v", err)
 	}
-	if s.StorageRef != nil && strings.TrimSpace(s.StorageRef.Name) == "" {
-		return fmt.Errorf("spec.storageRef.name cannot be empty")
+	if hasDuplicateSecretHeaderRefs(s.SecretHeaders) {
+		return fmt.Errorf("spec.secretHeaders contains duplicate names")
 	}
-	if s.SnapshotRef != nil && strings.TrimSpace(s.SnapshotRef.Name) == "" {
-		return fmt.Errorf("spec.snapshotRef.name cannot be empty")
-	}
-	if strings.TrimSpace(string(s.Target.Mode)) != "" {
-		switch s.Target.Mode {
-		case RestoreTargetModeInPlace, RestoreTargetModeOutOfPlace:
-		default:
-			return fmt.Errorf("unsupported spec.target.mode %q", s.Target.Mode)
-		}
-	}
-	if err := validateMySQLDriverConfig(s.Target.DriverConfig.MySQL); err != nil {
-		return err
-	}
-	if err := validateRedisDriverConfig(s.Target.DriverConfig.Redis); err != nil {
-		return err
-	}
-	if err := validateMinIODriverConfig(s.Target.DriverConfig.MinIO); err != nil {
-		return err
+	if s.TimeoutSeconds < 0 {
+		return fmt.Errorf("spec.timeoutSeconds cannot be negative")
 	}
 	return nil
-}
-
-func (s *BackupPolicySpec) EffectiveConcurrencyPolicy() batchv1.ConcurrencyPolicy {
-	if strings.TrimSpace(string(s.Schedule.ConcurrencyPolicy)) == "" {
-		return batchv1.ForbidConcurrent
-	}
-	return s.Schedule.ConcurrencyPolicy
 }
 
 func PredictCronJobNames(policyName string, storageRefs []corev1.LocalObjectReference) []string {
@@ -171,7 +168,7 @@ func PredictCronJobNames(policyName string, storageRefs []corev1.LocalObjectRefe
 		if storageName == "" {
 			continue
 		}
-		names = append(names, BuildCronJobName(policyName, storageName))
+		names = append(names, BuildCronJobName(policyName, storageName, "backup"))
 	}
 	sort.Strings(names)
 	return names
@@ -192,53 +189,47 @@ func hasDuplicateLocalObjectReferenceNames(refs []corev1.LocalObjectReference) b
 	return false
 }
 
-func validateMySQLDriverConfig(config *MySQLDriverConfig) error {
-	if config == nil {
-		return nil
-	}
-	if len(config.Databases) > 0 && len(config.Tables) > 0 {
-		return fmt.Errorf("mysql driver config cannot set both databases and tables")
-	}
-	for _, table := range config.Tables {
-		table = strings.TrimSpace(table)
-		if table == "" {
+func hasDuplicateSecretParameterRefs(refs []SecretParameterReference) bool {
+	seen := map[string]struct{}{}
+	for _, ref := range refs {
+		name := strings.TrimSpace(ref.Name)
+		if name == "" {
 			continue
 		}
-		parts := strings.Split(table, ".")
-		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
-			return fmt.Errorf("mysql driver config table selector must be database.table, got %q", table)
+		if _, ok := seen[name]; ok {
+			return true
 		}
+		seen[name] = struct{}{}
 	}
-	if restoreMode := strings.TrimSpace(config.RestoreMode); restoreMode != "" {
-		switch restoreMode {
-		case "merge", "wipe-all-user-databases":
-		default:
-			return fmt.Errorf("unsupported mysql restoreMode %q", config.RestoreMode)
-		}
-	}
-	return nil
+	return false
 }
 
-func validateRedisDriverConfig(config *RedisDriverConfig) error {
-	if config == nil {
-		return nil
-	}
-	if mode := strings.TrimSpace(config.Mode); mode != "" {
-		switch mode {
-		case "rdb":
-		default:
-			return fmt.Errorf("unsupported redis mode %q", config.Mode)
+func hasDuplicateSecretHeaderRefs(refs []SecretHeaderReference) bool {
+	seen := map[string]struct{}{}
+	for _, ref := range refs {
+		name := strings.TrimSpace(ref.Name)
+		if name == "" {
+			continue
 		}
+		if _, ok := seen[name]; ok {
+			return true
+		}
+		seen[name] = struct{}{}
 	}
-	return nil
+	return false
 }
 
-func validateMinIODriverConfig(config *MinIODriverConfig) error {
-	if config == nil {
-		return nil
+func hasDuplicateAddonParameters(params []AddonParameterSpec) bool {
+	seen := map[string]struct{}{}
+	for _, param := range params {
+		name := strings.TrimSpace(param.Name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			return true
+		}
+		seen[name] = struct{}{}
 	}
-	if config.IncludeVersions {
-		return fmt.Errorf("built-in minio addon does not support includeVersions=true yet")
-	}
-	return nil
+	return false
 }

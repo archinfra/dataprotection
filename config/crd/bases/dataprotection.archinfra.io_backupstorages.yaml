@@ -23,9 +23,12 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
-    - jsonPath: .spec.default
-      name: Default
-      type: boolean
+    - jsonPath: .status.lastProbeResult
+      name: Probe
+      type: string
+    - jsonPath: .status.lastProbeTime
+      name: ProbedAt
+      type: date
     - jsonPath: .status.message
       name: Message
       priority: 1
@@ -53,75 +56,35 @@ spec:
             type: object
           spec:
             properties:
-              default:
-                description: Default marks the namespace-level default storage for
-                  future expansion.
-                type: boolean
-              nfs:
-                description: NFS config is required when type=nfs.
-                properties:
-                  path:
-                    description: Path NFS 导出的共享路径
-                    type: string
-                  server:
-                    description: Server NFS 服务器地址（IP 或主机名）
-                    type: string
-                required:
-                - path
-                - server
-                type: object
-              s3:
-                description: S3 config is required when type=s3.
+              minio:
                 properties:
                   accessKeyFrom:
-                    description: AccessKeyFrom 从 Secret 中获取 AccessKey
                     properties:
                       key:
-                        description: Key Secret 中存放敏感数据的字段名
                         type: string
                       name:
-                        description: Name Secret 的名称（位于同一命名空间）
                         type: string
                     required:
                     - key
                     - name
                     type: object
+                  autoCreateBucket:
+                    type: boolean
                   bucket:
-                    description: Bucket 存储桶名称
                     type: string
                   endpoint:
-                    description: Endpoint S3 服务端点（如 https://s3.amazonaws.com 或 http://minio:9000）
                     type: string
                   insecure:
-                    description: Insecure 是否跳过 TLS 证书验证（仅测试环境）
                     type: boolean
                   prefix:
-                    description: Prefix 对象键前缀（相当于子目录）
                     type: string
                   region:
-                    description: Region 存储桶所在区域（可选，部分兼容服务需要）
                     type: string
                   secretKeyFrom:
-                    description: SecretKeyFrom 从 Secret 中获取 SecretKey
                     properties:
                       key:
-                        description: Key Secret 中存放敏感数据的字段名
                         type: string
                       name:
-                        description: Name Secret 的名称（位于同一命名空间）
-                        type: string
-                    required:
-                    - key
-                    - name
-                    type: object
-                  sessionTokenFrom:
-                    description: SessionTokenFrom 从 Secret 中获取临时会话 Token（可选，用于 STS）
-                    properties:
-                      key:
-                        description: Key Secret 中存放敏感数据的字段名
-                        type: string
-                      name:
-                        description: Name Secret 的名称（位于同一命名空间）
                         type: string
                     required:
                     - key
@@ -131,9 +94,17 @@ spec:
                 - bucket
                 - endpoint
                 type: object
+              nfs:
+                properties:
+                  path:
+                    type: string
+                  server:
+                    type: string
+                required:
+                - path
+                - server
+                type: object
               type:
-                description: Type selects which backend driver this reusable storage
-                  uses.
                 type: string
             required:
             - type
@@ -196,6 +167,13 @@ spec:
                   - type
                   type: object
                 type: array
+              lastProbeMessage:
+                type: string
+              lastProbeResult:
+                type: string
+              lastProbeTime:
+                format: date-time
+                type: string
               lastValidatedTime:
                 format: date-time
                 type: string
@@ -205,7 +183,6 @@ spec:
                 format: int64
                 type: integer
               phase:
-                description: ResourcePhase 定义资源当前的生命周期阶段
                 type: string
             type: object
         type: object

@@ -5,46 +5,39 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	dpv1alpha1 "github.com/archinfra/dataprotection/api/v1alpha1"
 )
 
 type BackupStorageReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
 }
 
 func (r *BackupStorageReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx).WithValues("backupStorage", req.NamespacedName.String())
-
 	var storage dpv1alpha1.BackupStorage
 	if err := r.Get(ctx, req.NamespacedName, &storage); err != nil {
-		if apierrors.IsNotFound(err) {
-			return ctrl.Result{}, nil
-		}
-		return ctrl.Result{}, err
+		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	original := storage.DeepCopy()
+	base := storage.DeepCopy()
 	storage.Status.ObservedGeneration = storage.Generation
-	storage.Status.LastValidatedTime = nowTime()
+	if storage.Status.LastProbeResult == "" {
+		storage.Status.LastProbeResult = dpv1alpha1.ProbeResultUnknown
+	}
 
 	if err := storage.Spec.ValidateBasic(); err != nil {
 		storage.Status.Phase = dpv1alpha1.ResourcePhaseFailed
 		storage.Status.Message = err.Error()
-		markCondition(&storage.Status.Conditions, "Ready", metav1.ConditionFalse, "InvalidSpec", err.Error(), storage.Generation)
+		markCondition(&storage.Status.Conditions, "Ready", metav1.ConditionFalse, "InvalidSpec", storage.Status.Message, storage.Generation)
 	} else {
-		storage.Status.Phase = dpv1alpha1.ResourcePhaseReady
-		storage.Status.Message = "backup storage specification is valid"
-		markCondition(&storage.Status.Conditions, "Ready", metav1.ConditionTrue, "Validated", "backup storage specification is valid", storage.Generation)
+		storage.Status.Phase = dpv1alpha1.ResourcePhaseConfigured
+		storage.Status.Message = "storage backend is configured; connectivity is checked before each execution"
+		markCondition(&storage.Status.Conditions, "Ready", metav1.ConditionTrue, "Configured", storage.Status.Message, storage.Generation)
 	}
 
-	if err := r.Status().Patch(ctx, &storage, client.MergeFrom(original)); err != nil {
-		logger.Error(err, "unable to patch BackupStorage status")
+	if err := r.Status().Patch(ctx, &storage, client.MergeFrom(base)); err != nil && !apierrors.IsNotFound(err) {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil

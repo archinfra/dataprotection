@@ -16,9 +16,7 @@ import (
 	"github.com/archinfra/dataprotection/controllers"
 )
 
-var (
-	scheme = runtime.NewScheme()
-)
+var scheme = runtime.NewScheme()
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
@@ -26,9 +24,9 @@ func init() {
 }
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "trigger-backup-run" {
-		if err := runTriggerBackupRun(os.Args[2:]); err != nil {
-			ctrl.Log.WithName("trigger").Error(err, "unable to create scheduled BackupRun")
+	if len(os.Args) > 1 && os.Args[1] == "notification-gateway" {
+		if err := runNotificationGateway(os.Args[2:]); err != nil {
+			ctrl.Log.WithName("notification-gateway").Error(err, "unable to run notification gateway")
 			os.Exit(1)
 		}
 		return
@@ -42,9 +40,7 @@ func main() {
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false, "Enable leader election for controller manager.")
 
-	opts := zap.Options{
-		Development: true,
-	}
+	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
@@ -64,53 +60,40 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controllers.BackupPolicyReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		ctrl.Log.WithName("setup").Error(err, "unable to create BackupPolicy controller")
+	if err = (&controllers.BackupAddonReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
+		ctrl.Log.WithName("setup").Error(err, "unable to create BackupAddon controller")
 		os.Exit(1)
 	}
-
-	if err = (&controllers.BackupRunReconciler{
-		Client:    mgr.GetClient(),
-		Scheme:    mgr.GetScheme(),
-		APIReader: mgr.GetAPIReader(),
-	}).SetupWithManager(mgr); err != nil {
-		ctrl.Log.WithName("setup").Error(err, "unable to create BackupRun controller")
-		os.Exit(1)
-	}
-
-	if err = (&controllers.RestoreRequestReconciler{
-		Client:    mgr.GetClient(),
-		Scheme:    mgr.GetScheme(),
-		APIReader: mgr.GetAPIReader(),
-	}).SetupWithManager(mgr); err != nil {
-		ctrl.Log.WithName("setup").Error(err, "unable to create RestoreRequest controller")
-		os.Exit(1)
-	}
-
-	if err = (&controllers.BackupSourceReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+	if err = (&controllers.BackupSourceReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
 		ctrl.Log.WithName("setup").Error(err, "unable to create BackupSource controller")
 		os.Exit(1)
 	}
-
-	if err = (&controllers.BackupStorageReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+	if err = (&controllers.BackupStorageReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
 		ctrl.Log.WithName("setup").Error(err, "unable to create BackupStorage controller")
 		os.Exit(1)
 	}
-
-	if err = (&controllers.RetentionPolicyReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+	if err = (&controllers.RetentionPolicyReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
 		ctrl.Log.WithName("setup").Error(err, "unable to create RetentionPolicy controller")
+		os.Exit(1)
+	}
+	if err = (&controllers.NotificationEndpointReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
+		ctrl.Log.WithName("setup").Error(err, "unable to create NotificationEndpoint controller")
+		os.Exit(1)
+	}
+	if err = (&controllers.BackupPolicyReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager(mgr); err != nil {
+		ctrl.Log.WithName("setup").Error(err, "unable to create BackupPolicy controller")
+		os.Exit(1)
+	}
+	if err = (&controllers.BackupJobReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), APIReader: mgr.GetAPIReader()}).SetupWithManager(mgr); err != nil {
+		ctrl.Log.WithName("setup").Error(err, "unable to create BackupJob controller")
+		os.Exit(1)
+	}
+	if err = (&controllers.RestoreJobReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), APIReader: mgr.GetAPIReader()}).SetupWithManager(mgr); err != nil {
+		ctrl.Log.WithName("setup").Error(err, "unable to create RestoreJob controller")
+		os.Exit(1)
+	}
+	if err = (&controllers.JobObserverReconciler{Client: mgr.GetClient(), APIReader: mgr.GetAPIReader()}).SetupWithManager(mgr); err != nil {
+		ctrl.Log.WithName("setup").Error(err, "unable to create JobObserver controller")
 		os.Exit(1)
 	}
 
@@ -123,7 +106,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	ctrl.Log.WithName("setup").Info("starting data protection operator")
+	ctrl.Log.WithName("setup").Info("starting data protection operator v2")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		ctrl.Log.WithName("setup").Error(err, "problem running manager")
 		os.Exit(1)

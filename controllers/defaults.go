@@ -9,36 +9,31 @@ import (
 )
 
 const (
-	defaultPlaceholderRunnerImageValue = "busybox:1.36"
-	defaultMySQLRunnerImageValue       = "mysql:8.0.45"
-	defaultRedisRunnerImageValue       = "redis:7.2.7-alpine"
-	defaultMinIORunnerImageValue       = "minio/mc:latest"
-	defaultS3HelperImageValue          = "minio/mc:latest"
-	defaultControllerImageValue        = "sealos.hub:5000/kube4/dataprotection-operator:latest"
-	defaultJobBackoffLimitValue        = int32(0)
-	defaultJobTTLSecondsValue          = int32(86400)
-	defaultCronJobSuccessHistoryValue  = int32(1)
-	defaultCronJobFailedHistoryValue   = int32(1)
+	defaultUtilityImageValue             = "registry.cn-beijing.aliyuncs.com/kube4/busybox:v1"
+	defaultMinIOHelperImageValue         = "minio/mc:latest"
+	defaultNotificationGatewayListenAddr = ":8090"
+	defaultNotificationGatewayURLValue   = "http://data-protection-notification-gateway.data-protection-system.svc.cluster.local:8090"
+	defaultControllerImageValue          = "sealos.hub:5000/kube4/dataprotection-operator:latest"
+	defaultJobBackoffLimitValue          = int32(0)
+	defaultJobTTLSecondsValue            = int32(86400)
+	defaultCronJobSuccessHistoryValue    = int32(1)
+	defaultCronJobFailedHistoryValue     = int32(1)
 )
 
-func defaultPlaceholderRunnerImage() string {
-	return envOrDefault("DP_DEFAULT_RUNNER_IMAGE", defaultPlaceholderRunnerImageValue)
+func defaultUtilityImage() string {
+	return envOrDefault("DP_DEFAULT_UTILITY_IMAGE", defaultUtilityImageValue)
 }
 
-func defaultMySQLRunnerImage() string {
-	return envOrDefault("DP_DEFAULT_MYSQL_RUNNER_IMAGE", defaultMySQLRunnerImageValue)
+func defaultMinIOHelperImage() string {
+	return envOrDefault("DP_DEFAULT_MINIO_HELPER_IMAGE", defaultMinIOHelperImageValue)
 }
 
-func defaultRedisRunnerImage() string {
-	return envOrDefault("DP_DEFAULT_REDIS_RUNNER_IMAGE", defaultRedisRunnerImageValue)
+func defaultNotificationGatewayURL() string {
+	return envOrDefault("DP_NOTIFICATION_GATEWAY_URL", defaultNotificationGatewayURLValue)
 }
 
-func defaultMinIORunnerImage() string {
-	return envOrDefault("DP_DEFAULT_MINIO_RUNNER_IMAGE", defaultMinIORunnerImageValue)
-}
-
-func defaultS3HelperImage() string {
-	return envOrDefault("DP_DEFAULT_S3_HELPER_IMAGE", defaultS3HelperImageValue)
+func defaultNotificationGatewayListenAddress() string {
+	return envOrDefault("DP_NOTIFICATION_GATEWAY_LISTEN_ADDRESS", defaultNotificationGatewayListenAddr)
 }
 
 func defaultControllerImage() string {
@@ -65,12 +60,12 @@ func defaultJobBackoffLimit() *int32 {
 }
 
 func defaultCronJobSuccessfulHistoryLimit() *int32 {
-	value := envOrDefaultInt32("DP_DEFAULT_TRIGGER_SUCCESS_HISTORY", defaultCronJobSuccessHistoryValue)
+	value := envOrDefaultInt32("DP_DEFAULT_CRONJOB_SUCCESS_HISTORY", defaultCronJobSuccessHistoryValue)
 	return &value
 }
 
 func defaultCronJobFailedHistoryLimit() *int32 {
-	value := envOrDefaultInt32("DP_DEFAULT_TRIGGER_FAILED_HISTORY", defaultCronJobFailedHistoryValue)
+	value := envOrDefaultInt32("DP_DEFAULT_CRONJOB_FAILED_HISTORY", defaultCronJobFailedHistoryValue)
 	return &value
 }
 

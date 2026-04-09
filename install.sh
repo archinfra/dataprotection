@@ -7,7 +7,7 @@
 set -Eeuo pipefail
 
 APP_NAME="data-protection-operator"
-APP_VERSION="${APP_VERSION:-0.2.10}"
+APP_VERSION="${APP_VERSION:-2.0.0}"
 WORKDIR="/tmp/${APP_NAME}-installer"
 IMAGE_DIR="${WORKDIR}/images"
 MANIFEST_DIR="${WORKDIR}/manifests"
@@ -29,11 +29,8 @@ DELETE_CRDS="false"
 SKIP_IMAGE_PREPARE="false"
 
 OPERATOR_IMAGE_OVERRIDE=""
-MYSQL_RUNNER_IMAGE_OVERRIDE=""
-REDIS_RUNNER_IMAGE_OVERRIDE=""
-MINIO_RUNNER_IMAGE_OVERRIDE=""
-S3_HELPER_IMAGE_OVERRIDE=""
-PLACEHOLDER_RUNNER_IMAGE_OVERRIDE=""
+MINIO_HELPER_IMAGE_OVERRIDE=""
+UTILITY_IMAGE_OVERRIDE=""
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -84,11 +81,8 @@ Options:
   --registry-user <user>            Optional docker registry username
   --registry-password <password>    Optional docker registry password
   --operator-image <image>          Override controller image
-  --mysql-runner-image <image>      Override default MySQL runner image
-  --redis-runner-image <image>      Override default Redis runner image
-  --minio-runner-image <image>      Override default MinIO runner image
-  --s3-helper-image <image>         Override default S3 helper image
-  --placeholder-runner-image <img>  Override default placeholder runner image
+  --minio-helper-image <image>      Override default MinIO helper image
+  --utility-image <image>           Override default utility image
   --image-pull-policy <policy>      Always|IfNotPresent|Never, default: ${IMAGE_PULL_POLICY}
   --wait-timeout <duration>         rollout wait timeout, default: ${WAIT_TIMEOUT}
   --skip-image-prepare              Reuse images already present in the target registry
@@ -141,29 +135,14 @@ parse_args() {
         OPERATOR_IMAGE_OVERRIDE="$2"
         shift 2
         ;;
-      --mysql-runner-image)
+      --minio-helper-image|--s3-helper-image)
         [[ $# -ge 2 ]] || die "Missing value for $1"
-        MYSQL_RUNNER_IMAGE_OVERRIDE="$2"
+        MINIO_HELPER_IMAGE_OVERRIDE="$2"
         shift 2
         ;;
-      --redis-runner-image)
+      --utility-image|--placeholder-runner-image)
         [[ $# -ge 2 ]] || die "Missing value for $1"
-        REDIS_RUNNER_IMAGE_OVERRIDE="$2"
-        shift 2
-        ;;
-      --minio-runner-image)
-        [[ $# -ge 2 ]] || die "Missing value for $1"
-        MINIO_RUNNER_IMAGE_OVERRIDE="$2"
-        shift 2
-        ;;
-      --s3-helper-image)
-        [[ $# -ge 2 ]] || die "Missing value for $1"
-        S3_HELPER_IMAGE_OVERRIDE="$2"
-        shift 2
-        ;;
-      --placeholder-runner-image)
-        [[ $# -ge 2 ]] || die "Missing value for $1"
-        PLACEHOLDER_RUNNER_IMAGE_OVERRIDE="$2"
+        UTILITY_IMAGE_OVERRIDE="$2"
         shift 2
         ;;
       --image-pull-policy)
@@ -319,41 +298,17 @@ operator_image_ref() {
   default_image_ref "dataprotection-operator"
 }
 
-mysql_runner_image_ref() {
-  if [[ -n "${MYSQL_RUNNER_IMAGE_OVERRIDE}" ]]; then
-    printf '%s' "${MYSQL_RUNNER_IMAGE_OVERRIDE}"
-    return
-  fi
-  default_image_ref "dataprotection-mysql"
-}
-
-redis_runner_image_ref() {
-  if [[ -n "${REDIS_RUNNER_IMAGE_OVERRIDE}" ]]; then
-    printf '%s' "${REDIS_RUNNER_IMAGE_OVERRIDE}"
-    return
-  fi
-  default_image_ref "dataprotection-redis"
-}
-
-minio_runner_image_ref() {
-  if [[ -n "${MINIO_RUNNER_IMAGE_OVERRIDE}" ]]; then
-    printf '%s' "${MINIO_RUNNER_IMAGE_OVERRIDE}"
+minio_helper_image_ref() {
+  if [[ -n "${MINIO_HELPER_IMAGE_OVERRIDE}" ]]; then
+    printf '%s' "${MINIO_HELPER_IMAGE_OVERRIDE}"
     return
   fi
   default_image_ref "dataprotection-minio-mc"
 }
 
-s3_helper_image_ref() {
-  if [[ -n "${S3_HELPER_IMAGE_OVERRIDE}" ]]; then
-    printf '%s' "${S3_HELPER_IMAGE_OVERRIDE}"
-    return
-  fi
-  default_image_ref "dataprotection-minio-mc"
-}
-
-placeholder_runner_image_ref() {
-  if [[ -n "${PLACEHOLDER_RUNNER_IMAGE_OVERRIDE}" ]]; then
-    printf '%s' "${PLACEHOLDER_RUNNER_IMAGE_OVERRIDE}"
+utility_image_ref() {
+  if [[ -n "${UTILITY_IMAGE_OVERRIDE}" ]]; then
+    printf '%s' "${UTILITY_IMAGE_OVERRIDE}"
     return
   fi
   default_image_ref "dataprotection-busybox"
@@ -401,34 +356,22 @@ prepare_images() {
 render_install_manifest() {
   local output_file="$1"
   local operator_image
-  local mysql_runner_image
-  local redis_runner_image
-  local minio_runner_image
-  local s3_helper_image
-  local placeholder_runner_image
+  local utility_image
+  local minio_helper_image
 
   operator_image="$(operator_image_ref)"
-  mysql_runner_image="$(mysql_runner_image_ref)"
-  redis_runner_image="$(redis_runner_image_ref)"
-  minio_runner_image="$(minio_runner_image_ref)"
-  s3_helper_image="$(s3_helper_image_ref)"
-  placeholder_runner_image="$(placeholder_runner_image_ref)"
+  utility_image="$(utility_image_ref)"
+  minio_helper_image="$(minio_helper_image_ref)"
 
   [[ -n "${operator_image}" ]] || die "operator image ref is empty"
-  [[ -n "${mysql_runner_image}" ]] || die "mysql runner image ref is empty"
-  [[ -n "${redis_runner_image}" ]] || die "redis runner image ref is empty"
-  [[ -n "${minio_runner_image}" ]] || die "minio runner image ref is empty"
-  [[ -n "${s3_helper_image}" ]] || die "s3 helper image ref is empty"
-  [[ -n "${placeholder_runner_image}" ]] || die "placeholder runner image ref is empty"
+  [[ -n "${utility_image}" ]] || die "utility image ref is empty"
+  [[ -n "${minio_helper_image}" ]] || die "minio helper image ref is empty"
 
   sed \
     -e "s|{{NAMESPACE}}|${NAMESPACE}|g" \
     -e "s|{{OPERATOR_IMAGE}}|${operator_image}|g" \
-    -e "s|{{MYSQL_RUNNER_IMAGE}}|${mysql_runner_image}|g" \
-    -e "s|{{REDIS_RUNNER_IMAGE}}|${redis_runner_image}|g" \
-    -e "s|{{MINIO_RUNNER_IMAGE}}|${minio_runner_image}|g" \
-    -e "s|{{S3_HELPER_IMAGE}}|${s3_helper_image}|g" \
-    -e "s|{{PLACEHOLDER_RUNNER_IMAGE}}|${placeholder_runner_image}|g" \
+    -e "s|{{UTILITY_IMAGE}}|${utility_image}|g" \
+    -e "s|{{MINIO_HELPER_IMAGE}}|${minio_helper_image}|g" \
     -e "s|{{IMAGE_PULL_POLICY}}|${IMAGE_PULL_POLICY}|g" \
     "${INSTALL_TEMPLATE}" > "${output_file}"
 }

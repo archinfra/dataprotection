@@ -6,26 +6,19 @@ import (
 )
 
 type BackupPolicySpec struct {
-	// SourceRef points to the protected source object.
-	SourceRef corev1.LocalObjectReference `json:"sourceRef"`
-	// StorageRefs lists the destination backends. The policy controller renders
-	// one schedule trigger per storage.
-	StorageRefs []corev1.LocalObjectReference `json:"storageRefs,omitempty"`
-	Schedule    BackupScheduleSpec            `json:"schedule,omitempty"`
-	Retention   RetentionRule                 `json:"retention,omitempty"`
-	// RetentionPolicyRef points to the reusable retention object.
-	RetentionPolicyRef *corev1.LocalObjectReference `json:"retentionPolicyRef,omitempty"`
-	Verification       VerificationSpec             `json:"verification,omitempty"`
-	Execution          ExecutionTemplateSpec        `json:"execution,omitempty"`
-	DriverConfig       DriverConfig                 `json:"driverConfig,omitempty"`
-	Suspend            bool                         `json:"suspend,omitempty"`
+	SourceRef        corev1.LocalObjectReference   `json:"sourceRef"`
+	StorageRefs      []corev1.LocalObjectReference `json:"storageRefs,omitempty"`
+	Schedule         BackupScheduleSpec            `json:"schedule,omitempty"`
+	RetentionRef     *corev1.LocalObjectReference  `json:"retentionRef,omitempty"`
+	NotificationRefs []corev1.LocalObjectReference `json:"notificationRefs,omitempty"`
+	JobRuntime       JobRuntimeSpec                `json:"jobRuntime,omitempty"`
+	Suspend          bool                          `json:"suspend,omitempty"`
 }
 
 type BackupPolicyStatus struct {
 	Phase              ResourcePhase      `json:"phase,omitempty"`
 	ObservedGeneration int64              `json:"observedGeneration,omitempty"`
 	LastScheduleTime   *metav1.Time       `json:"lastScheduleTime,omitempty"`
-	NextScheduleTime   *metav1.Time       `json:"nextScheduleTime,omitempty"`
 	Message            string             `json:"message,omitempty"`
 	CronJobNames       []string           `json:"cronJobNames,omitempty"`
 	Conditions         []metav1.Condition `json:"conditions,omitempty"`

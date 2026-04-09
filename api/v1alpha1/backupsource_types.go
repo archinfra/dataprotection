@@ -1,15 +1,17 @@
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type BackupSourceSpec struct {
-	Driver       BackupDriver               `json:"driver"`
-	TargetRef    *NamespacedObjectReference `json:"targetRef,omitempty"`
-	Endpoint     EndpointSpec               `json:"endpoint,omitempty"`
-	DriverConfig DriverConfig               `json:"driverConfig,omitempty"`
-	Paused       bool                       `json:"paused,omitempty"`
+	AddonRef   corev1.LocalObjectReference `json:"addonRef"`
+	TargetRef  *NamespacedObjectReference  `json:"targetRef,omitempty"`
+	Endpoint   EndpointSpec                `json:"endpoint,omitempty"`
+	Parameters map[string]string           `json:"parameters,omitempty"`
+	SecretRefs []SecretParameterReference  `json:"secretRefs,omitempty"`
+	Paused     bool                        `json:"paused,omitempty"`
 }
 
 type BackupSourceStatus struct {
@@ -22,7 +24,7 @@ type BackupSourceStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="Driver",type=string,JSONPath=`.spec.driver`
+// +kubebuilder:printcolumn:name="Addon",type=string,JSONPath=`.spec.addonRef.name`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Paused",type=boolean,JSONPath=`.spec.paused`
 // +kubebuilder:printcolumn:name="Message",type=string,priority=1,JSONPath=`.status.message`

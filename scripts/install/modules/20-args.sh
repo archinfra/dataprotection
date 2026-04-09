@@ -37,29 +37,14 @@ parse_args() {
         OPERATOR_IMAGE_OVERRIDE="$2"
         shift 2
         ;;
-      --mysql-runner-image)
+      --minio-helper-image|--s3-helper-image)
         [[ $# -ge 2 ]] || die "Missing value for $1"
-        MYSQL_RUNNER_IMAGE_OVERRIDE="$2"
+        MINIO_HELPER_IMAGE_OVERRIDE="$2"
         shift 2
         ;;
-      --redis-runner-image)
+      --utility-image|--placeholder-runner-image)
         [[ $# -ge 2 ]] || die "Missing value for $1"
-        REDIS_RUNNER_IMAGE_OVERRIDE="$2"
-        shift 2
-        ;;
-      --minio-runner-image)
-        [[ $# -ge 2 ]] || die "Missing value for $1"
-        MINIO_RUNNER_IMAGE_OVERRIDE="$2"
-        shift 2
-        ;;
-      --s3-helper-image)
-        [[ $# -ge 2 ]] || die "Missing value for $1"
-        S3_HELPER_IMAGE_OVERRIDE="$2"
-        shift 2
-        ;;
-      --placeholder-runner-image)
-        [[ $# -ge 2 ]] || die "Missing value for $1"
-        PLACEHOLDER_RUNNER_IMAGE_OVERRIDE="$2"
+        UTILITY_IMAGE_OVERRIDE="$2"
         shift 2
         ;;
       --image-pull-policy)

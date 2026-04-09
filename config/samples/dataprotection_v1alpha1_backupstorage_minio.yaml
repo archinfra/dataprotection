@@ -1,0 +1,18 @@
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: BackupStorage
+metadata:
+  name: minio-primary
+  namespace: backup-system
+spec:
+  type: minio
+  minio:
+    endpoint: http://minio.aict.svc.cluster.local:9000
+    bucket: data-protection
+    prefix: prod
+    autoCreateBucket: true
+    accessKeyFrom:
+      name: minio-credentials
+      key: access-key
+    secretKeyFrom:
+      name: minio-credentials
+      key: secret-key

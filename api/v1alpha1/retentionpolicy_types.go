@@ -2,15 +2,9 @@ package v1alpha1
 
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-type SnapshotRetentionRule struct {
-	Last int32 `json:"last,omitempty"`
-}
-
 type RetentionPolicySpec struct {
-	Default             bool                  `json:"default,omitempty"`
-	MaxRetentionPeriod  string                `json:"maxRetentionPeriod,omitempty"`
-	SuccessfulSnapshots SnapshotRetentionRule `json:"successfulSnapshots,omitempty"`
-	FailedSnapshots     SnapshotRetentionRule `json:"failedSnapshots,omitempty"`
+	SuccessfulSnapshots SuccessfulSnapshotRetentionSpec `json:"successfulSnapshots,omitempty"`
+	FailedExecutions    FailedExecutionRetentionSpec    `json:"failedExecutions,omitempty"`
 }
 
 type RetentionPolicyStatus struct {
@@ -23,9 +17,8 @@ type RetentionPolicyStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
-// +kubebuilder:printcolumn:name="SuccessKeep",type=integer,JSONPath=`.spec.successfulSnapshots.last`
-// +kubebuilder:printcolumn:name="FailedKeep",type=integer,JSONPath=`.spec.failedSnapshots.last`
-// +kubebuilder:printcolumn:name="Default",type=boolean,JSONPath=`.spec.default`
+// +kubebuilder:printcolumn:name="KeepSuccess",type=integer,JSONPath=`.spec.successfulSnapshots.keepLast`
+// +kubebuilder:printcolumn:name="KeepFailed",type=integer,JSONPath=`.spec.failedExecutions.keepLast`
 // +kubebuilder:printcolumn:name="Message",type=string,priority=1,JSONPath=`.status.message`
 // +kubebuilder:resource:shortName=rp
 type RetentionPolicy struct {

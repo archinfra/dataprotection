@@ -17,11 +17,13 @@ rules:
   - apiGroups:
       - dataprotection.archinfra.io
     resources:
+      - backupaddons
+      - backupjobs
       - backuppolicies
-      - backupruns
       - backupsources
       - backupstorages
-      - restorerequests
+      - notificationendpoints
+      - restorejobs
       - retentionpolicies
       - snapshots
     verbs:
@@ -35,11 +37,13 @@ rules:
   - apiGroups:
       - dataprotection.archinfra.io
     resources:
+      - backupaddons/status
+      - backupjobs/status
       - backuppolicies/status
-      - backupruns/status
       - backupsources/status
       - backupstorages/status
-      - restorerequests/status
+      - notificationendpoints/status
+      - restorejobs/status
       - retentionpolicies/status
       - snapshots/status
     verbs:
@@ -63,33 +67,10 @@ rules:
       - ""
     resources:
       - pods
+      - secrets
     verbs:
       - get
       - list
-  - apiGroups:
-      - ""
-    resources:
-      - serviceaccounts
-    verbs:
-      - create
-      - delete
-      - get
-      - list
-      - patch
-      - update
-      - watch
-  - apiGroups:
-      - rbac.authorization.k8s.io
-    resources:
-      - roles
-      - rolebindings
-    verbs:
-      - create
-      - delete
-      - get
-      - list
-      - patch
-      - update
       - watch
   - apiGroups:
       - coordination.k8s.io
@@ -124,6 +105,24 @@ subjects:
     name: data-protection-operator-controller-manager
     namespace: {{NAMESPACE}}
 ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: data-protection-notification-gateway
+  namespace: {{NAMESPACE}}
+  labels:
+    app.kubernetes.io/name: data-protection-operator
+    app.kubernetes.io/component: notification-gateway
+spec:
+  selector:
+    app.kubernetes.io/name: data-protection-operator
+    app.kubernetes.io/component: notification-gateway
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090
+      protocol: TCP
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -154,18 +153,14 @@ spec:
             - --metrics-bind-address=:8080
             - --health-probe-bind-address=:8081
           env:
-            - name: DP_DEFAULT_RUNNER_IMAGE
-              value: {{PLACEHOLDER_RUNNER_IMAGE}}
-            - name: DP_DEFAULT_MYSQL_RUNNER_IMAGE
-              value: {{MYSQL_RUNNER_IMAGE}}
-            - name: DP_DEFAULT_REDIS_RUNNER_IMAGE
-              value: {{REDIS_RUNNER_IMAGE}}
-            - name: DP_DEFAULT_MINIO_RUNNER_IMAGE
-              value: {{MINIO_RUNNER_IMAGE}}
-            - name: DP_DEFAULT_S3_HELPER_IMAGE
-              value: {{S3_HELPER_IMAGE}}
             - name: DP_DEFAULT_CONTROLLER_IMAGE
               value: {{OPERATOR_IMAGE}}
+            - name: DP_DEFAULT_UTILITY_IMAGE
+              value: {{UTILITY_IMAGE}}
+            - name: DP_DEFAULT_MINIO_HELPER_IMAGE
+              value: {{MINIO_HELPER_IMAGE}}
+            - name: DP_NOTIFICATION_GATEWAY_URL
+              value: http://data-protection-notification-gateway.{{NAMESPACE}}.svc.cluster.local:8090
           ports:
             - name: metrics
               containerPort: 8080
@@ -192,6 +187,68 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: data-protection-notification-gateway
+  namespace: {{NAMESPACE}}
+  labels:
+    app.kubernetes.io/name: data-protection-operator
+    app.kubernetes.io/component: notification-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: data-protection-operator
+      app.kubernetes.io/component: notification-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: data-protection-operator
+        app.kubernetes.io/component: notification-gateway
+    spec:
+      serviceAccountName: data-protection-operator-controller-manager
+      containers:
+        - name: notification-gateway
+          image: {{OPERATOR_IMAGE}}
+          imagePullPolicy: {{IMAGE_PULL_POLICY}}
+          args:
+            - notification-gateway
+            - --listen-address=:8090
+          ports:
+            - name: http
+              containerPort: 8090
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

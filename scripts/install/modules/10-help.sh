@@ -15,11 +15,8 @@ Options:
   --registry-user <user>            Optional docker registry username
   --registry-password <password>    Optional docker registry password
   --operator-image <image>          Override controller image
-  --mysql-runner-image <image>      Override default MySQL runner image
-  --redis-runner-image <image>      Override default Redis runner image
-  --minio-runner-image <image>      Override default MinIO runner image
-  --s3-helper-image <image>         Override default S3 helper image
-  --placeholder-runner-image <img>  Override default placeholder runner image
+  --minio-helper-image <image>      Override default MinIO helper image
+  --utility-image <image>           Override default utility image
   --image-pull-policy <policy>      Always|IfNotPresent|Never, default: ${IMAGE_PULL_POLICY}
   --wait-timeout <duration>         rollout wait timeout, default: ${WAIT_TIMEOUT}
   --skip-image-prepare              Reuse images already present in the target registry

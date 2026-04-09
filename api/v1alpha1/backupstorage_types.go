@@ -3,20 +3,18 @@ package v1alpha1
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 type BackupStorageSpec struct {
-	// Type selects which backend driver this reusable storage uses.
-	Type StorageType `json:"type"`
-	// Default marks the namespace-level default storage for future expansion.
-	Default bool `json:"default,omitempty"`
-	// NFS config is required when type=nfs.
-	NFS *NFSStorageSpec `json:"nfs,omitempty"`
-	// S3 config is required when type=s3.
-	S3 *S3StorageSpec `json:"s3,omitempty"`
+	Type  StorageType       `json:"type"`
+	NFS   *NFSStorageSpec   `json:"nfs,omitempty"`
+	MinIO *MinIOStorageSpec `json:"minio,omitempty"`
 }
 
 type BackupStorageStatus struct {
 	Phase              ResourcePhase      `json:"phase,omitempty"`
 	ObservedGeneration int64              `json:"observedGeneration,omitempty"`
 	LastValidatedTime  *metav1.Time       `json:"lastValidatedTime,omitempty"`
+	LastProbeTime      *metav1.Time       `json:"lastProbeTime,omitempty"`
+	LastProbeResult    ProbeResult        `json:"lastProbeResult,omitempty"`
+	LastProbeMessage   string             `json:"lastProbeMessage,omitempty"`
 	Message            string             `json:"message,omitempty"`
 	Conditions         []metav1.Condition `json:"conditions,omitempty"`
 }
@@ -25,7 +23,8 @@ type BackupStorageStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.spec.type`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
-// +kubebuilder:printcolumn:name="Default",type=boolean,JSONPath=`.spec.default`
+// +kubebuilder:printcolumn:name="Probe",type=string,JSONPath=`.status.lastProbeResult`
+// +kubebuilder:printcolumn:name="ProbedAt",type=date,JSONPath=`.status.lastProbeTime`
 // +kubebuilder:printcolumn:name="Message",type=string,priority=1,JSONPath=`.status.message`
 // +kubebuilder:resource:shortName=bst
 type BackupStorage struct {

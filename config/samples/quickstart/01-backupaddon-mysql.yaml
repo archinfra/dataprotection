@@ -1,0 +1,24 @@
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: BackupAddon
+metadata:
+  name: mysql-dump
+spec:
+  displayName: MySQL Dump Addon
+  version: 1.0.0
+  backupTemplate:
+    image: mysql:8.0.45
+    command:
+      - /bin/sh
+    args:
+      - -ceu
+      - |
+        mkdir -p /workspace/output
+        exec mysqldump -h"${DP_SOURCE_HOST}" -P"${DP_SOURCE_PORT}" -u"${DP_SOURCE_USERNAME}" -p"${DP_SOURCE_PASSWORD}" --all-databases > /workspace/output/dump.sql
+  restoreTemplate:
+    image: mysql:8.0.45
+    command:
+      - /bin/sh
+    args:
+      - -ceu
+      - |
+        exec mysql -h"${DP_SOURCE_HOST}" -P"${DP_SOURCE_PORT}" -u"${DP_SOURCE_USERNAME}" -p"${DP_SOURCE_PASSWORD}" < /workspace/input/dump.sql

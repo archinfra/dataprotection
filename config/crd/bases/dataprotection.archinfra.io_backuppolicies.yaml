@@ -59,267 +59,21 @@ spec:
             type: object
           spec:
             properties:
-              driverConfig:
-                description: DriverConfig 各数据驱动的专用配置（联合类型）
+              jobRuntime:
                 properties:
-                  milvus:
-                    description: Milvus Milvus 驱动配置
-                    properties:
-                      collections:
-                        description: Collections 要备份的集合列表，格式 "database.collection"
-                        items:
-                          type: string
-                        type: array
-                      databases:
-                        description: Databases 要备份的数据库列表（Milvus 2.2+ 支持多库）
-                        items:
-                          type: string
-                        type: array
-                      includeObjectStorage:
-                        description: IncludeObjectStorage 是否同时备份底层的对象存储数据
-                        type: boolean
-                    type: object
-                  minio:
-                    description: MinIO MinIO 驱动配置
-                    properties:
-                      buckets:
-                        description: Buckets 要备份的桶列表（为空表示全部）
-                        items:
-                          type: string
-                        type: array
-                      includeVersions:
-                        description: IncludeVersions 是否备份对象的历史版本（需启用版本控制）
-                        type: boolean
-                      prefixes:
-                        description: Prefixes 仅备份桶内指定前缀的对象
-                        items:
-                          type: string
-                        type: array
-                    type: object
-                  mongodb:
-                    description: MongoDB MongoDB 驱动配置
-                    properties:
-                      collections:
-                        description: Collections 要备份的集合列表，格式 "database.collection"
-                        items:
-                          type: string
-                        type: array
-                      databases:
-                        description: Databases 要备份的数据库列表（为空表示全部）
-                        items:
-                          type: string
-                        type: array
-                      includeUsersRoles:
-                        description: IncludeUsersRoles 是否同时备份用户和角色定义
-                        type: boolean
-                    type: object
-                  mysql:
-                    description: MySQL MySQL 驱动配置
-                    properties:
-                      databases:
-                        description: Databases 要备份的数据库列表（为空表示全部）
-                        items:
-                          type: string
-                        type: array
-                      mode:
-                        description: Mode 操作模式：逻辑备份（logical）或物理备份（physical）
-                        type: string
-                      restoreMode:
-                        description: RestoreMode 恢复模式：merge（合并）、wipe-all-user-databases（清空所有用户数据库后恢复）
-                        type: string
-                      tables:
-                        description: Tables 要备份的表列表，格式为 "database.table"，为空表示数据库内全部表
-                        items:
-                          type: string
-                        type: array
-                    type: object
-                  rabbitmq:
-                    description: RabbitMQ RabbitMQ 驱动配置
-                    properties:
-                      includeDefinitions:
-                        description: IncludeDefinitions 是否备份交换机、队列、绑定等定义
-                        type: boolean
-                      queues:
-                        description: Queues 要备份的队列列表，格式 "vhost/queueName"
-                        items:
-                          type: string
-                        type: array
-                      vhosts:
-                        description: Vhosts 要备份的虚拟主机列表（为空表示所有 vhost）
-                        items:
-                          type: string
-                        type: array
-                    type: object
-                  redis:
-                    description: Redis Redis 驱动配置
-                    properties:
-                      databases:
-                        description: Databases 要备份的数据库索引列表（-1 表示所有）
-                        items:
-                          format: int32
-                          type: integer
-                        type: array
-                      keyPrefix:
-                        description: KeyPrefix 仅备份匹配指定前缀的键（支持通配符）
-                        items:
-                          type: string
-                        type: array
-                      mode:
-                        description: Mode 模式：rdb（快照）、aof（追加日志）或混合
-                        type: string
-                    type: object
-                type: object
-              execution:
-                description: ExecutionTemplateSpec 定义备份/恢复 Job 的执行模板，对应 Kubernetes
-                  Pod 模板的子集
-                properties:
-                  args:
-                    description: Args 传递给命令的参数
-                    items:
-                      type: string
-                    type: array
-                  backoffLimit:
-                    description: BackoffLimit Job 失败后的重试次数限制
-                    format: int32
-                    type: integer
-                  command:
-                    description: Command 覆盖容器默认入口命令
-                    items:
-                      type: string
-                    type: array
-                  extraEnv:
-                    description: ExtraEnv 注入到主容器的额外环境变量
-                    items:
-                      description: EnvVar represents an environment variable present
-                        in a Container.
-                      properties:
-                        name:
-                          description: Name of the environment variable. Must be a
-                            C_IDENTIFIER.
-                          type: string
-                        value:
-                          description: |-
-                            Variable references $(VAR_NAME) are expanded
-                            using the previously defined environment variables in the container and
-                            any service environment variables. If a variable cannot be resolved,
-                            the reference in the input string will be unchanged. Double $$ are reduced
-                            to a single $, which allows for escaping the $(VAR_NAME) syntax: i.e.
-                            "$$(VAR_NAME)" will produce the string literal "$(VAR_NAME)".
-                            Escaped references will never be expanded, regardless of whether the variable
-                            exists or not.
-                            Defaults to "".
-                          type: string
-                        valueFrom:
-                          description: Source for the environment variable's value.
-                            Cannot be used if value is not empty.
-                          properties:
-                            configMapKeyRef:
-                              description: Selects a key of a ConfigMap.
-                              properties:
-                                key:
-                                  description: The key to select.
-                                  type: string
-                                name:
-                                  default: ""
-                                  description: |-
-                                    Name of the referent.
-                                    This field is effectively required, but due to backwards compatibility is
-                                    allowed to be empty. Instances of this type with an empty value here are
-                                    almost certainly wrong.
-                                    More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                                  type: string
-                                optional:
-                                  description: Specify whether the ConfigMap or its
-                                    key must be defined
-                                  type: boolean
-                              required:
-                              - key
-                              type: object
-                              x-kubernetes-map-type: atomic
-                            fieldRef:
-                              description: |-
-                                Selects a field of the pod: supports metadata.name, metadata.namespace, `metadata.labels['<KEY>']`, `metadata.annotations['<KEY>']`,
-                                spec.nodeName, spec.serviceAccountName, status.hostIP, status.podIP, status.podIPs.
-                              properties:
-                                apiVersion:
-                                  description: Version of the schema the FieldPath
-                                    is written in terms of, defaults to "v1".
-                                  type: string
-                                fieldPath:
-                                  description: Path of the field to select in the
-                                    specified API version.
-                                  type: string
-                              required:
-                              - fieldPath
-                              type: object
-                              x-kubernetes-map-type: atomic
-                            resourceFieldRef:
-                              description: |-
-                                Selects a resource of the container: only resources limits and requests
-                                (limits.cpu, limits.memory, limits.ephemeral-storage, requests.cpu, requests.memory and requests.ephemeral-storage) are currently supported.
-                              properties:
-                                containerName:
-                                  description: 'Container name: required for volumes,
-                                    optional for env vars'
-                                  type: string
-                                divisor:
-                                  anyOf:
-                                  - type: integer
-                                  - type: string
-                                  description: Specifies the output format of the
-                                    exposed resources, defaults to "1"
-                                  pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                                  x-kubernetes-int-or-string: true
-                                resource:
-                                  description: 'Required: resource to select'
-                                  type: string
-                              required:
-                              - resource
-                              type: object
-                              x-kubernetes-map-type: atomic
-                            secretKeyRef:
-                              description: Selects a key of a secret in the pod's
-                                namespace
-                              properties:
-                                key:
-                                  description: The key of the secret to select from.  Must
-                                    be a valid secret key.
-                                  type: string
-                                name:
-                                  default: ""
-                                  description: |-
-                                    Name of the referent.
-                                    This field is effectively required, but due to backwards compatibility is
-                                    allowed to be empty. Instances of this type with an empty value here are
-                                    almost certainly wrong.
-                                    More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                                  type: string
-                                optional:
-                                  description: Specify whether the Secret or its key
-                                    must be defined
-                                  type: boolean
-                              required:
-                              - key
-                              type: object
-                              x-kubernetes-map-type: atomic
-                          type: object
-                      required:
-                      - name
-                      type: object
-                    type: array
-                  helperImage:
-                    description: HelperImage 辅助容器镜像（如 mc、mysqldump 客户端等）
-                    type: string
                   imagePullPolicy:
-                    description: ImagePullPolicy 镜像拉取策略（Always、Never、IfNotPresent）
+                    description: PullPolicy describes a policy for if/when to pull
+                      a container image
                     type: string
                   nodeSelector:
                     additionalProperties:
                       type: string
-                    description: NodeSelector 将 Job Pod 调度到匹配标签的节点
                     type: object
+                  priorityClassName:
+                    type: string
                   resources:
-                    description: Resources 容器的资源请求和限制（CPU/内存）
+                    description: ResourceRequirements describes the compute resource
+                      requirements.
                     properties:
                       claims:
                         description: |-
@@ -377,14 +131,9 @@ spec:
                           More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                         type: object
                     type: object
-                  runnerImage:
-                    description: RunnerImage 执行备份/恢复操作的主容器镜像
-                    type: string
                   serviceAccountName:
-                    description: ServiceAccountName 运行 Job 时使用的 ServiceAccount
                     type: string
                   tolerations:
-                    description: Tolerations 允许 Pod 调度到带有污点的节点
                     items:
                       description: |-
                         The pod this Toleration is attached to tolerates any taint that matches
@@ -423,20 +172,31 @@ spec:
                       type: object
                     type: array
                   ttlSecondsAfterFinished:
-                    description: TTLSecondsAfterFinished Job 完成后保留的秒数，过期后自动清理
                     format: int32
                     type: integer
                 type: object
-              retention:
-                description: RetentionRule 定义兼容旧版本的内联保留策略
-                properties:
-                  keepLast:
-                    description: KeepLast 保留最近多少个备份，旧备份将被自动清理
-                    format: int32
-                    type: integer
-                type: object
-              retentionPolicyRef:
-                description: RetentionPolicyRef points to the reusable retention object.
+              notificationRefs:
+                items:
+                  description: |-
+                    LocalObjectReference contains enough information to let you locate the
+                    referenced object inside the same namespace.
+                  properties:
+                    name:
+                      default: ""
+                      description: |-
+                        Name of the referent.
+                        This field is effectively required, but due to backwards compatibility is
+                        allowed to be empty. Instances of this type with an empty value here are
+                        almost certainly wrong.
+                        More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                      type: string
+                  type: object
+                  x-kubernetes-map-type: atomic
+                type: array
+              retentionRef:
+                description: |-
+                  LocalObjectReference contains enough information to let you locate the
+                  referenced object inside the same namespace.
                 properties:
                   name:
                     default: ""
@@ -450,24 +210,26 @@ spec:
                 type: object
                 x-kubernetes-map-type: atomic
               schedule:
-                description: BackupScheduleSpec 定义备份的定时调度策略（基于 Cron）
                 properties:
                   concurrencyPolicy:
-                    description: ConcurrencyPolicy 并发策略：Allow（允许并发）、Forbid（禁止并发）、Replace（替换旧任务）
+                    description: |-
+                      ConcurrencyPolicy describes how the job will be handled.
+                      Only one of the following concurrent policies may be specified.
+                      If none of the following policies is specified, the default one
+                      is AllowConcurrent.
                     type: string
                   cron:
-                    description: Cron 标准 Cron 表达式，例如 "0 2 * * *"（每天凌晨2点）
                     type: string
                   startingDeadlineSeconds:
-                    description: StartingDeadlineSeconds 调度启动的截止时间（秒），超时则跳过本次调度
                     format: int64
                     type: integer
                   suspend:
-                    description: Suspend 是否暂停调度
                     type: boolean
                 type: object
               sourceRef:
-                description: SourceRef points to the protected source object.
+                description: |-
+                  LocalObjectReference contains enough information to let you locate the
+                  referenced object inside the same namespace.
                 properties:
                   name:
                     default: ""
@@ -481,9 +243,6 @@ spec:
                 type: object
                 x-kubernetes-map-type: atomic
               storageRefs:
-                description: |-
-                  StorageRefs lists the destination backends. The policy controller renders
-                  one schedule trigger per storage.
                 items:
                   description: |-
                     LocalObjectReference contains enough information to let you locate the
@@ -503,16 +262,6 @@ spec:
                 type: array
               suspend:
                 type: boolean
-              verification:
-                description: VerificationSpec 定义备份完成后的验证配置
-                properties:
-                  enabled:
-                    description: Enabled 是否启用验证
-                    type: boolean
-                  mode:
-                    description: Mode 验证模式
-                    type: string
-                type: object
             required:
             - sourceRef
             type: object
@@ -583,14 +332,10 @@ spec:
                 type: string
               message:
                 type: string
-              nextScheduleTime:
-                format: date-time
-                type: string
               observedGeneration:
                 format: int64
                 type: integer
               phase:
-                description: ResourcePhase 定义资源当前的生命周期阶段
                 type: string
             type: object
         type: object

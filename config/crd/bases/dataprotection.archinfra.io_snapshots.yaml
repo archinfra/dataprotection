@@ -38,10 +38,10 @@ spec:
       type: date
     - jsonPath: .spec.snapshot
       name: Snapshot
-      priority: 1
       type: string
     - jsonPath: .status.message
       name: Message
+      priority: 1
       type: string
     name: v1alpha1
     schema:
@@ -66,7 +66,9 @@ spec:
             type: object
           spec:
             properties:
-              backupRunRef:
+              backendPath:
+                type: string
+              backupJobRef:
                 description: |-
                   LocalObjectReference contains enough information to let you locate the
                   referenced object inside the same namespace.
@@ -82,9 +84,31 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
-              driver:
-                description: BackupDriver 定义支持的数据库/中间件类型，即数据驱动类型
+              checksum:
                 type: string
+              nativeJobName:
+                type: string
+              policyRef:
+                description: |-
+                  LocalObjectReference contains enough information to let you locate the
+                  referenced object inside the same namespace.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+              series:
+                type: string
+              size:
+                format: int64
+                type: integer
               snapshot:
                 type: string
               sourceRef:
@@ -103,13 +127,10 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
-              storagePath:
-                description: StoragePath records the effective backend path used during
-                  backup.
-                type: string
               storageRef:
-                description: StorageRef tells us which backend owns this snapshot
-                  artifact.
+                description: |-
+                  LocalObjectReference contains enough information to let you locate the
+                  referenced object inside the same namespace.
                 properties:
                   name:
                     default: ""
@@ -123,8 +144,8 @@ spec:
                 type: object
                 x-kubernetes-map-type: atomic
             required:
-            - backupRunRef
-            - driver
+            - backendPath
+            - series
             - snapshot
             - sourceRef
             - storageRef
@@ -200,7 +221,6 @@ spec:
                 format: int64
                 type: integer
               phase:
-                description: ResourcePhase 定义资源当前的生命周期阶段
                 type: string
               startedAt:
                 format: date-time
