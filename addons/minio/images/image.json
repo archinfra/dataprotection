@@ -1,0 +1,18 @@
+[
+  {
+    "arch": "amd64",
+    "platform": "linux/amd64",
+    "name": "dataprotection-addon-minio",
+    "pull": "quay.io/minio/mc:latest",
+    "tag": "sealos.hub:5000/kube4/dataprotection-addon-minio:latest",
+    "tar": "dataprotection-addon-minio-latest-amd64.tar"
+  },
+  {
+    "arch": "arm64",
+    "platform": "linux/arm64",
+    "name": "dataprotection-addon-minio",
+    "pull": "quay.io/minio/mc:latest",
+    "tag": "sealos.hub:5000/kube4/dataprotection-addon-minio:latest",
+    "tar": "dataprotection-addon-minio-latest-arm64.tar"
+  }
+]

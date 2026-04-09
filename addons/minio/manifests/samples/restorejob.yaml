@@ -1,0 +1,13 @@
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: RestoreJob
+metadata:
+  name: minio-source-restore
+  namespace: backup-system
+spec:
+  sourceRef:
+    name: minio-source
+  snapshotRef:
+    name: replace-with-snapshot-name
+  notificationRefs:
+    - name: ops-webhook
+  reason: restore minio source snapshot

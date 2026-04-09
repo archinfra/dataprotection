@@ -1,0 +1,18 @@
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: BackupPolicy
+metadata:
+  name: mysql-prod-every-3m
+  namespace: backup-system
+spec:
+  sourceRef:
+    name: mysql-prod
+  storageRefs:
+    - name: minio-primary
+    - name: nfs-primary
+  schedule:
+    cron: "*/3 * * * *"
+    concurrencyPolicy: Forbid
+  retentionRef:
+    name: keep-last-3
+  notificationRefs:
+    - name: ops-webhook

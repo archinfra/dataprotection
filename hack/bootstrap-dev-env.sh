@@ -20,7 +20,6 @@ GOBIN="${LOCALBIN}" go install sigs.k8s.io/controller-tools/cmd/controller-gen@v
 
 go version
 "${LOCALBIN}/controller-gen" --version
-go mod tidy
 
 cat <<EOF
 dev environment is ready

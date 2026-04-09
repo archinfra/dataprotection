@@ -1,0 +1,75 @@
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: BackupAddon
+metadata:
+  name: milvus-backup
+spec:
+  displayName: Milvus Backup Addon
+  version: __ADDON_VERSION__
+  supportedKinds:
+    - Milvus
+    - VectorDatabase
+  parameters:
+    - name: backupNamePrefix
+      description: Prefix for generated backup names.
+      defaultValue: milvus
+    - name: collections
+      description: Comma-separated collection list. Empty means all collections.
+    - name: database
+      description: Optional database name.
+  backupTemplate:
+    image: __RUNNER_IMAGE__
+    command:
+      - /bin/sh
+    args:
+      - -ceu
+      - |
+        set -eu
+        mkdir -p /workspace/output
+        host="${DP_SOURCE_HOST:?DP_SOURCE_HOST is required}"
+        port="${DP_SOURCE_PORT:-19530}"
+        user="${DP_SOURCE_USERNAME_FROM_SECRET:-${DP_SOURCE_USERNAME:-}}"
+        pass="${DP_SOURCE_PASSWORD:-}"
+        backup_name="${DP_PARAM_BACKUPNAMEPREFIX:-milvus}-$(date +%Y%m%d%H%M%S)"
+        cat > /tmp/backup.yaml <<EOF
+        milvus:
+          address: ${host}:${port}
+          username: ${user}
+          password: ${pass}
+        storage:
+          storageType: local
+          rootPath: /workspace/output
+        EOF
+        cmd="milvus-backup create --config /tmp/backup.yaml -n ${backup_name}"
+        if [ -n "${DP_PARAM_DATABASE:-}" ]; then
+          cmd="${cmd} -d ${DP_PARAM_DATABASE}"
+        fi
+        if [ -n "${DP_PARAM_COLLECTIONS:-}" ]; then
+          cmd="${cmd} -c ${DP_PARAM_COLLECTIONS}"
+        else
+          cmd="${cmd} -a"
+        fi
+        exec /bin/sh -ceu "${cmd}"
+  restoreTemplate:
+    image: __RUNNER_IMAGE__
+    command:
+      - /bin/sh
+    args:
+      - -ceu
+      - |
+        set -eu
+        host="${DP_SOURCE_HOST:?DP_SOURCE_HOST is required}"
+        port="${DP_SOURCE_PORT:-19530}"
+        user="${DP_SOURCE_USERNAME_FROM_SECRET:-${DP_SOURCE_USERNAME:-}}"
+        pass="${DP_SOURCE_PASSWORD:-}"
+        snapshot_name="$(basename "$(find /workspace/input -mindepth 1 -maxdepth 1 -type d | head -n 1)")"
+        [ -n "${snapshot_name}" ] || { echo "milvus snapshot directory not found"; exit 1; }
+        cat > /tmp/backup.yaml <<EOF
+        milvus:
+          address: ${host}:${port}
+          username: ${user}
+          password: ${pass}
+        storage:
+          storageType: local
+          rootPath: /workspace/input
+        EOF
+        exec milvus-backup restore --config /tmp/backup.yaml -n "${snapshot_name}" -a

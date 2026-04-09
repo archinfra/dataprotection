@@ -1,0 +1,18 @@
+[
+  {
+    "arch": "amd64",
+    "platform": "linux/amd64",
+    "name": "dataprotection-addon-milvus",
+    "tag": "sealos.hub:5000/kube4/dataprotection-addon-milvus:v0.5.12",
+    "tar": "dataprotection-addon-milvus-v0.5.12-amd64.tar",
+    "dockerfile": "Dockerfile.runner"
+  },
+  {
+    "arch": "arm64",
+    "platform": "linux/arm64",
+    "name": "dataprotection-addon-milvus",
+    "tag": "sealos.hub:5000/kube4/dataprotection-addon-milvus:v0.5.12",
+    "tar": "dataprotection-addon-milvus-v0.5.12-arm64.tar",
+    "dockerfile": "Dockerfile.runner"
+  }
+]

@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: redis-auth
+  namespace: backup-system
+type: Opaque
+stringData:
+  password: replace-me
+---
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: BackupSource
+metadata:
+  name: redis-standalone
+  namespace: backup-system
+spec:
+  addonRef:
+    name: redis-rdb
+  endpoint:
+    host: redis-master.redis.svc.cluster.local
+    port: 6379
+    passwordFrom:
+      name: redis-auth
+      key: password
+  parameters:
+    mode: standalone

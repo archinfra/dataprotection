@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: milvus-auth
+  namespace: backup-system
+type: Opaque
+stringData:
+  password: replace-me
+---
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: BackupSource
+metadata:
+  name: milvus-prod
+  namespace: backup-system
+spec:
+  addonRef:
+    name: milvus-backup
+  endpoint:
+    host: milvus-proxy.milvus.svc.cluster.local
+    port: 19530
+    username: root
+    passwordFrom:
+      name: milvus-auth
+      key: password
+  parameters:
+    backupNamePrefix: milvus

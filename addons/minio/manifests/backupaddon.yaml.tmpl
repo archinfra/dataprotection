@@ -1,0 +1,59 @@
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: BackupAddon
+metadata:
+  name: minio-mirror
+spec:
+  displayName: MinIO Mirror Addon
+  version: __ADDON_VERSION__
+  supportedKinds:
+    - MinIO
+    - ObjectStore
+  parameters:
+    - name: bucket
+      required: true
+      description: Source bucket name.
+    - name: prefix
+      description: Optional source prefix inside the bucket.
+  backupTemplate:
+    image: __RUNNER_IMAGE__
+    command:
+      - /bin/sh
+    args:
+      - -ceu
+      - |
+        set -eu
+        mkdir -p /workspace/output/data
+        host="${DP_SOURCE_HOST:?DP_SOURCE_HOST is required}"
+        port="${DP_SOURCE_PORT:-9000}"
+        scheme="${DP_SOURCE_SCHEME:-http}"
+        access="${DP_SOURCE_USERNAME_FROM_SECRET:-${DP_SOURCE_USERNAME:-}}"
+        secret="${DP_SOURCE_PASSWORD:-}"
+        bucket="${DP_PARAM_BUCKET:?DP_PARAM_BUCKET is required}"
+        prefix="${DP_PARAM_PREFIX:-}"
+        source_path="source/${bucket}"
+        if [ -n "${prefix}" ]; then
+          source_path="${source_path}/${prefix}"
+        fi
+        mc alias set source "${scheme}://${host}:${port}" "${access}" "${secret}" --api S3v4 >/dev/null
+        mc mirror --overwrite "${source_path}" /workspace/output/data
+  restoreTemplate:
+    image: __RUNNER_IMAGE__
+    command:
+      - /bin/sh
+    args:
+      - -ceu
+      - |
+        set -eu
+        host="${DP_SOURCE_HOST:?DP_SOURCE_HOST is required}"
+        port="${DP_SOURCE_PORT:-9000}"
+        scheme="${DP_SOURCE_SCHEME:-http}"
+        access="${DP_SOURCE_USERNAME_FROM_SECRET:-${DP_SOURCE_USERNAME:-}}"
+        secret="${DP_SOURCE_PASSWORD:-}"
+        bucket="${DP_PARAM_BUCKET:?DP_PARAM_BUCKET is required}"
+        prefix="${DP_PARAM_PREFIX:-}"
+        target_path="source/${bucket}"
+        if [ -n "${prefix}" ]; then
+          target_path="${target_path}/${prefix}"
+        fi
+        mc alias set source "${scheme}://${host}:${port}" "${access}" "${secret}" --api S3v4 >/dev/null
+        mc mirror --overwrite /workspace/input/data "${target_path}"

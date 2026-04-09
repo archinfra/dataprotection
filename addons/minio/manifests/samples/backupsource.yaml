@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-source-auth
+  namespace: backup-system
+type: Opaque
+stringData:
+  access-key: replace-me
+  secret-key: replace-me
+---
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: BackupSource
+metadata:
+  name: minio-source
+  namespace: backup-system
+spec:
+  addonRef:
+    name: minio-mirror
+  endpoint:
+    scheme: http
+    host: minio.aict.svc.cluster.local
+    port: 9000
+    usernameFrom:
+      name: minio-source-auth
+      key: access-key
+    passwordFrom:
+      name: minio-source-auth
+      key: secret-key
+  parameters:
+    bucket: app-data
+    prefix: tenant-a

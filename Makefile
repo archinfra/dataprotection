@@ -9,7 +9,7 @@ CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 endif
 
 .PHONY: all
-all: fmt test
+all: fmt mod-tidy test
 
 .PHONY: controller-gen
 controller-gen:
@@ -22,6 +22,10 @@ controller-gen:
 .PHONY: fmt
 fmt:
 	find . -name '*.go' -print0 | xargs -0 $(GOFMT) -w
+
+.PHONY: mod-tidy
+mod-tidy:
+	$(GO) mod tidy
 
 .PHONY: generate
 generate: controller-gen

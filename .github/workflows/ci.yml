@@ -36,16 +36,25 @@ jobs:
       - name: Bootstrap
         run: bash hack/bootstrap-dev-env.sh
 
+      - name: Module tidy check
+        run: |
+          make mod-tidy
+          git diff --exit-code go.mod go.sum
+
       - name: Format check
         run: |
           make fmt
           git diff --exit-code
 
       - name: Generate
-        run: make generate
+        run: |
+          make generate
+          git diff --exit-code
 
       - name: Manifests
-        run: make manifests
+        run: |
+          make manifests
+          git diff --exit-code
 
       - name: Unit tests
         run: make test

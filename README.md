@@ -181,3 +181,16 @@ make manifests
 make test
 APP_VERSION="$(cat VERSION)" bash scripts/assemble-install.sh install.sh
 ```
+
+## Addon run packages
+
+The core installer already packages the notification gateway together with the operator.
+
+Addon runner images and `BackupAddon` manifests now live under:
+
+- [addons/mysql](C:/Users/admin/Desktop/release/dataprotection/addons/mysql)
+- [addons/redis](C:/Users/admin/Desktop/release/dataprotection/addons/redis)
+- [addons/minio](C:/Users/admin/Desktop/release/dataprotection/addons/minio)
+- [addons/milvus](C:/Users/admin/Desktop/release/dataprotection/addons/milvus)
+
+Each addon directory can build its own multi-arch `.run` package and export ready-to-apply sample YAMLs.

@@ -128,10 +128,17 @@ jobs:
       - name: Bootstrap
         run: bash hack/bootstrap-dev-env.sh
 
+      - name: Module tidy check
+        run: |
+          make mod-tidy
+          git diff --exit-code go.mod go.sum
+
       - name: Generate and test
         run: |
           make generate
+          git diff --exit-code
           make manifests
+          git diff --exit-code
           make test
 
   publish-images:

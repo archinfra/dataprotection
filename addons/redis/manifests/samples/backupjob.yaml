@@ -1,0 +1,15 @@
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: BackupJob
+metadata:
+  name: redis-standalone-manual
+  namespace: backup-system
+spec:
+  sourceRef:
+    name: redis-standalone
+  storageRef:
+    name: minio-primary
+  retentionRef:
+    name: keep-last-3
+  notificationRefs:
+    - name: ops-webhook
+  reason: manual redis backup

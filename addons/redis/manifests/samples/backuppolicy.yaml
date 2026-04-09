@@ -1,0 +1,17 @@
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: BackupPolicy
+metadata:
+  name: redis-cluster-every-5m
+  namespace: backup-system
+spec:
+  sourceRef:
+    name: redis-cluster
+  storageRefs:
+    - name: minio-primary
+  schedule:
+    cron: "*/5 * * * *"
+    concurrencyPolicy: Forbid
+  retentionRef:
+    name: keep-last-3
+  notificationRefs:
+    - name: ops-webhook

@@ -1,0 +1,15 @@
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: BackupJob
+metadata:
+  name: mysql-prod-manual-minio
+  namespace: backup-system
+spec:
+  sourceRef:
+    name: mysql-prod
+  storageRef:
+    name: minio-primary
+  retentionRef:
+    name: keep-last-3
+  notificationRefs:
+    - name: ops-webhook
+  reason: manual mysql backup

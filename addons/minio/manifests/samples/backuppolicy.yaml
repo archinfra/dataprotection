@@ -1,0 +1,17 @@
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: BackupPolicy
+metadata:
+  name: minio-source-every-10m
+  namespace: backup-system
+spec:
+  sourceRef:
+    name: minio-source
+  storageRefs:
+    - name: minio-primary
+  schedule:
+    cron: "*/10 * * * *"
+    concurrencyPolicy: Forbid
+  retentionRef:
+    name: keep-last-3
+  notificationRefs:
+    - name: ops-webhook

@@ -1,0 +1,59 @@
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: BackupAddon
+metadata:
+  name: redis-rdb
+spec:
+  displayName: Redis RDB Addon
+  version: __ADDON_VERSION__
+  supportedKinds:
+    - Redis
+    - StatefulSet
+  parameters:
+    - name: mode
+      description: standalone or cluster
+      defaultValue: standalone
+    - name: filePrefix
+      description: Optional prefix for generated RDB files.
+  backupTemplate:
+    image: __RUNNER_IMAGE__
+    command:
+      - /bin/sh
+    args:
+      - -ceu
+      - |
+        set -eu
+        mkdir -p /workspace/output
+        host="${DP_SOURCE_HOST:?DP_SOURCE_HOST is required}"
+        port="${DP_SOURCE_PORT:-6379}"
+        user="${DP_SOURCE_USERNAME_FROM_SECRET:-${DP_SOURCE_USERNAME:-}}"
+        pass="${DP_SOURCE_PASSWORD:-}"
+        prefix="${DP_PARAM_FILEPREFIX:-redis}"
+        mode="${DP_PARAM_MODE:-standalone}"
+
+        run_redis() {
+          if [ -n "${user}" ] && [ -n "${pass}" ]; then
+            redis-cli --user "${user}" -a "${pass}" "$@"
+          elif [ -n "${pass}" ]; then
+            redis-cli -a "${pass}" "$@"
+          elif [ -n "${user}" ]; then
+            redis-cli --user "${user}" "$@"
+          else
+            redis-cli "$@"
+          fi
+        }
+
+        if [ "${mode}" = "cluster" ]; then
+          mkdir -p /workspace/output/masters
+          run_redis -h "${host}" -p "${port}" CLUSTER NODES | awk '$3 ~ /master/ {print $2}' | while IFS= read -r endpoint; do
+            [ -n "${endpoint}" ] || continue
+            node="${endpoint%@*}"
+            node_host="${node%:*}"
+            node_port="${node##*:}"
+            target="/workspace/output/masters/${prefix}-${node_host}-${node_port}.rdb"
+            run_redis -h "${node_host}" -p "${node_port}" --rdb "${target}"
+          done
+          test -n "$(find /workspace/output/masters -type f -name '*.rdb' -print -quit)"
+          exit 0
+        fi
+
+        run_redis -h "${host}" -p "${port}" --rdb "/workspace/output/${prefix}.rdb"

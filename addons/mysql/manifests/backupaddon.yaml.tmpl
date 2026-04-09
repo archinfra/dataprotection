@@ -1,0 +1,47 @@
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: BackupAddon
+metadata:
+  name: mysql-dump
+spec:
+  displayName: MySQL Dump Addon
+  version: __ADDON_VERSION__
+  supportedKinds:
+    - MySQL
+    - StatefulSet
+  parameters:
+    - name: database
+      description: Optional database to dump.
+    - name: dumpArgs
+      description: Extra mysqldump arguments.
+  backupTemplate:
+    image: __RUNNER_IMAGE__
+    command:
+      - /bin/sh
+    args:
+      - -ceu
+      - |
+        set -eu
+        mkdir -p /workspace/output
+        host="${DP_SOURCE_HOST:?DP_SOURCE_HOST is required}"
+        port="${DP_SOURCE_PORT:-3306}"
+        user="${DP_SOURCE_USERNAME_FROM_SECRET:-${DP_SOURCE_USERNAME:-root}}"
+        pass="${DP_SOURCE_PASSWORD:-}"
+        dump_args="${DP_PARAM_DUMPARGS:-}"
+        if [ -n "${DP_PARAM_DATABASE:-}" ]; then
+          exec mysqldump -h"${host}" -P"${port}" -u"${user}" -p"${pass}" ${dump_args} "${DP_PARAM_DATABASE}" > /workspace/output/dump.sql
+        fi
+        exec mysqldump -h"${host}" -P"${port}" -u"${user}" -p"${pass}" ${dump_args} --all-databases > /workspace/output/dump.sql
+  restoreTemplate:
+    image: __RUNNER_IMAGE__
+    command:
+      - /bin/sh
+    args:
+      - -ceu
+      - |
+        set -eu
+        test -f /workspace/input/dump.sql
+        host="${DP_SOURCE_HOST:?DP_SOURCE_HOST is required}"
+        port="${DP_SOURCE_PORT:-3306}"
+        user="${DP_SOURCE_USERNAME_FROM_SECRET:-${DP_SOURCE_USERNAME:-root}}"
+        pass="${DP_SOURCE_PASSWORD:-}"
+        exec mysql -h"${host}" -P"${port}" -u"${user}" -p"${pass}" < /workspace/input/dump.sql

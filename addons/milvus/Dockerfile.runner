@@ -1,0 +1,21 @@
+ARG TARGETARCH=amd64
+ARG MILVUS_BACKUP_VERSION=v0.5.12
+
+FROM public.ecr.aws/docker/library/alpine:3.20
+
+ARG TARGETARCH
+ARG MILVUS_BACKUP_VERSION
+
+RUN apk add --no-cache bash ca-certificates curl tar
+
+RUN case "${TARGETARCH}" in \
+      amd64) asset="milvus-backup_Linux_x86_64.tar.gz" ;; \
+      arm64) asset="milvus-backup_Linux_arm64.tar.gz" ;; \
+      *) echo "unsupported arch: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+ && curl -fsSL -o /tmp/milvus-backup.tar.gz "https://github.com/zilliztech/milvus-backup/releases/download/${MILVUS_BACKUP_VERSION}/${asset}" \
+ && tar -xzf /tmp/milvus-backup.tar.gz -C /usr/local/bin milvus-backup \
+ && chmod +x /usr/local/bin/milvus-backup \
+ && rm -f /tmp/milvus-backup.tar.gz
+
+ENTRYPOINT ["/bin/sh"]
