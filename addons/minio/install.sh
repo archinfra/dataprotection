@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 
 APP_NAME="dataprotection-addon-minio"
-INSTALLER_VERSION="2.0.1"
+INSTALLER_VERSION="2.0.2"
 DISPLAY_NAME="DataProtection MinIO Addon"
 ADDON_NAME="minio-mirror"
 WORKDIR="/tmp/${APP_NAME}-installer"

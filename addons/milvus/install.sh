@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 
 APP_NAME="dataprotection-addon-milvus"
-INSTALLER_VERSION="2.0.1"
+INSTALLER_VERSION="2.0.2"
 DISPLAY_NAME="DataProtection Milvus Addon"
 ADDON_NAME="milvus-backup"
 WORKDIR="/tmp/${APP_NAME}-installer"

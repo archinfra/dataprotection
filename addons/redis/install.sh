@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 
 APP_NAME="dataprotection-addon-redis"
-INSTALLER_VERSION="2.0.1"
+INSTALLER_VERSION="2.0.2"
 DISPLAY_NAME="DataProtection Redis Addon"
 ADDON_NAME="redis-rdb"
 WORKDIR="/tmp/${APP_NAME}-installer"
