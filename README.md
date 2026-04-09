@@ -194,3 +194,7 @@ Addon runner images and `BackupAddon` manifests now live under:
 - [addons/milvus](C:/Users/admin/Desktop/release/dataprotection/addons/milvus)
 
 Each addon directory can build its own multi-arch `.run` package and export ready-to-apply sample YAMLs.
+
+Execution responsibilities and the addon/core storage interaction model are documented here:
+
+- [docs/EXECUTION-FLOW.zh-CN.md](C:/Users/admin/Desktop/release/dataprotection/docs/EXECUTION-FLOW.zh-CN.md)

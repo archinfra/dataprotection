@@ -36,3 +36,7 @@ Export samples:
 ```
 
 The root workflow [addon-installers.yml](C:/Users/admin/Desktop/release/dataprotection/.github/workflows/addon-installers.yml) builds and releases these packages for both `amd64` and `arm64`.
+
+If you want the detailed runtime sequence for “addon writes local workspace, core talks to NFS/MinIO”, read:
+
+- [EXECUTION-FLOW.zh-CN.md](C:/Users/admin/Desktop/release/dataprotection/docs/EXECUTION-FLOW.zh-CN.md)
