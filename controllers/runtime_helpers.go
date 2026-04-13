@@ -363,8 +363,8 @@ func buildBackupPodSpec(runtime dpv1alpha1.JobRuntimeSpec, source *dpv1alpha1.Ba
 		InitContainers:     []corev1.Container{buildStoragePreflightContainer(storage)},
 		Containers: []corev1.Container{
 			buildAddonBackupContainer(addon, runtime, env),
-			buildArtifactPackageContainer(),
-			buildArtifactUploadContainer(storage),
+			buildArtifactPackageContainer(env),
+			buildArtifactUploadContainer(storage, env),
 		},
 	}
 }
@@ -455,9 +455,10 @@ func buildAddonBackupContainer(addon *dpv1alpha1.BackupAddon, runtime dpv1alpha1
 	}
 }
 
-func buildArtifactPackageContainer() corev1.Container {
+func buildArtifactPackageContainer(env []corev1.EnvVar) corev1.Container {
 	script := strings.Join([]string{
 		"set -eu",
+		"trap 'touch /workspace/status/package.failed' ERR",
 		"while [ ! -f /workspace/status/plugin.done ]; do",
 		"  if [ -f /workspace/status/plugin.failed ]; then",
 		"    echo '[ERROR] addon backup failed'",
@@ -488,6 +489,7 @@ func buildArtifactPackageContainer() corev1.Container {
 		ImagePullPolicy: defaultImagePullPolicy(defaultUtilityImage()),
 		Command:         []string{"/bin/sh", "-ceu"},
 		Args:            []string{script},
+		Env:             mergeEnvVars(env),
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: "workspace-output", MountPath: "/workspace/output"},
 			{Name: "workspace-status", MountPath: "/workspace/status"},
@@ -495,7 +497,7 @@ func buildArtifactPackageContainer() corev1.Container {
 	}
 }
 
-func buildArtifactUploadContainer(storage *dpv1alpha1.BackupStorage) corev1.Container {
+func buildArtifactUploadContainer(storage *dpv1alpha1.BackupStorage, env []corev1.EnvVar) corev1.Container {
 	image := defaultUtilityImage()
 	script := buildNFSUploadScript()
 	if storage.Spec.Type == dpv1alpha1.StorageTypeMinIO {
@@ -508,7 +510,7 @@ func buildArtifactUploadContainer(storage *dpv1alpha1.BackupStorage) corev1.Cont
 		ImagePullPolicy: defaultImagePullPolicy(image),
 		Command:         []string{"/bin/sh", "-ceu"},
 		Args:            []string{script},
-		Env:             buildStorageEnv(storage),
+		Env:             mergeEnvVars(env, buildStorageEnv(storage)),
 		VolumeMounts: append([]corev1.VolumeMount{
 			{Name: "workspace-status", MountPath: "/workspace/status"},
 		}, storageVolumeMounts(storage)...),
