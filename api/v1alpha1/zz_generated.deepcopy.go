@@ -731,6 +731,11 @@ func (in *JobRuntimeSpec) DeepCopyInto(out *JobRuntimeSpec) {
 		}
 	}
 	in.Resources.DeepCopyInto(&out.Resources)
+	if in.ActiveDeadlineSeconds != nil {
+		in, out := &in.ActiveDeadlineSeconds, &out.ActiveDeadlineSeconds
+		*out = new(int64)
+		**out = **in
+	}
 	if in.TTLSecondsAfterFinished != nil {
 		in, out := &in.TTLSecondsAfterFinished, &out.TTLSecondsAfterFinished
 		*out = new(int32)
