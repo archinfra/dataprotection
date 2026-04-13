@@ -99,6 +99,7 @@ prepare_directories() {
 
 prepare_images() {
   local count=0
+  : > "${TEMP_DIR}/images/image.jsonl"
   while IFS= read -r item; do
     [[ -n "${item}" ]] || continue
     local pull tag tar_name platform dockerfile build_ref
@@ -133,11 +134,13 @@ prepare_images() {
 
     log "Saving ${build_ref} to ${tar_name}"
     docker save -o "${TEMP_DIR}/images/${tar_name}" "${build_ref}"
+    jq -c . <<<"${item}" >> "${TEMP_DIR}/images/image.jsonl"
     count=$((count + 1))
   done < <(jq -c --arg arch "${ARCH}" '.[] | select(.arch == $arch)' "${IMAGE_JSON}")
 
   (( count > 0 )) || die "No image definitions found for arch=${ARCH}"
-  cp "${IMAGE_JSON}" "${TEMP_DIR}/images/"
+  jq -s '.' "${TEMP_DIR}/images/image.jsonl" > "${TEMP_DIR}/images/image.json"
+  rm -f "${TEMP_DIR}/images/image.jsonl"
 }
 
 package_payload() {
