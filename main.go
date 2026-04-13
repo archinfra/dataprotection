@@ -76,6 +76,10 @@ func main() {
 		ctrl.Log.WithName("setup").Error(err, "unable to create RetentionPolicy controller")
 		os.Exit(1)
 	}
+	if err = (&controllers.SnapshotReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager(mgr); err != nil {
+		ctrl.Log.WithName("setup").Error(err, "unable to create Snapshot controller")
+		os.Exit(1)
+	}
 	if err = (&controllers.NotificationEndpointReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
 		ctrl.Log.WithName("setup").Error(err, "unable to create NotificationEndpoint controller")
 		os.Exit(1)
