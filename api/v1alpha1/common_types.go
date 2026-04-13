@@ -91,6 +91,7 @@ type JobRuntimeSpec struct {
 	NodeSelector            map[string]string           `json:"nodeSelector,omitempty"`
 	Tolerations             []corev1.Toleration         `json:"tolerations,omitempty"`
 	Resources               corev1.ResourceRequirements `json:"resources,omitempty"`
+	ActiveDeadlineSeconds   *int64                      `json:"activeDeadlineSeconds,omitempty"`
 	TTLSecondsAfterFinished *int32                      `json:"ttlSecondsAfterFinished,omitempty"`
 	PriorityClassName       string                      `json:"priorityClassName,omitempty"`
 }

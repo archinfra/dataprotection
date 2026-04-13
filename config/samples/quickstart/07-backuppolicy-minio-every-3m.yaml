@@ -11,6 +11,8 @@ spec:
   schedule:
     cron: "*/3 * * * *"
     concurrencyPolicy: Forbid
+  jobRuntime:
+    activeDeadlineSeconds: 1800
   retentionRef:
     name: keep-last-3
   notificationRefs:

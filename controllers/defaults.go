@@ -15,6 +15,7 @@ const (
 	defaultNotificationGatewayURLValue   = "http://data-protection-notification-gateway.data-protection-system.svc.cluster.local:8090"
 	defaultControllerImageValue          = "sealos.hub:5000/kube4/dataprotection-operator:latest"
 	defaultJobBackoffLimitValue          = int32(0)
+	defaultJobActiveDeadlineValue        = int64(1800)
 	defaultJobTTLSecondsValue            = int32(86400)
 	defaultCronJobSuccessHistoryValue    = int32(1)
 	defaultCronJobFailedHistoryValue     = int32(1)
@@ -54,6 +55,11 @@ func defaultJobTTLSeconds() *int32 {
 	return &value
 }
 
+func defaultJobActiveDeadlineSeconds() *int64 {
+	value := envOrDefaultInt64("DP_DEFAULT_JOB_ACTIVE_DEADLINE_SECONDS", defaultJobActiveDeadlineValue)
+	return &value
+}
+
 func defaultJobBackoffLimit() *int32 {
 	value := envOrDefaultInt32("DP_DEFAULT_JOB_BACKOFF_LIMIT", defaultJobBackoffLimitValue)
 	return &value
@@ -87,6 +93,18 @@ func envOrDefaultInt32(key string, fallback int32) int32 {
 		return fallback
 	}
 	return int32(parsed)
+}
+
+func envOrDefaultInt64(key string, fallback int64) int64 {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func imageUsesMutableTag(image string) bool {

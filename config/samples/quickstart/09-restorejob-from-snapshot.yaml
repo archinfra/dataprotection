@@ -8,6 +8,8 @@ spec:
     name: mysql-smoke
   snapshotRef:
     name: mysql-smoke-manual-nfs-nfs-primary-snapshot
+  jobRuntime:
+    activeDeadlineSeconds: 1800
   notificationRefs:
     - name: ops-webhook
   reason: restore validated smoke snapshot

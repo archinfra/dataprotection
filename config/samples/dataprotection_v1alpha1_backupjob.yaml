@@ -10,6 +10,8 @@ spec:
     name: nfs-primary
   retentionRef:
     name: keep-last-3
+  jobRuntime:
+    activeDeadlineSeconds: 1800
   notificationRefs:
     - name: ops-webhook
   reason: manual smoke backup

@@ -8,6 +8,8 @@ spec:
     name: mysql-prod
   snapshotRef:
     name: mysql-prod-manual-nfs-nfs-primary-snapshot
+  jobRuntime:
+    activeDeadlineSeconds: 1800
   notificationRefs:
     - name: ops-webhook
   reason: restore latest verified snapshot

@@ -60,6 +60,9 @@ spec:
             properties:
               jobRuntime:
                 properties:
+                  activeDeadlineSeconds:
+                    format: int64
+                    type: integer
                   imagePullPolicy:
                     description: PullPolicy describes a policy for if/when to pull
                       a container image

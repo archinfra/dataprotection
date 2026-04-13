@@ -288,6 +288,7 @@ func buildBackupJobSpec(executionKind, executionName, series, backendPath string
 	)
 	podSpec := buildBackupPodSpec(runtime, source, addon, storage, env)
 	return singleExecutionJobSpec(batchv1.JobSpec{
+		ActiveDeadlineSeconds:   cloneInt64Ptr(runtime.ActiveDeadlineSeconds),
 		BackoffLimit:            defaultJobBackoffLimit(),
 		TTLSecondsAfterFinished: cloneInt32Ptr(runtime.TTLSecondsAfterFinished),
 		Template: corev1.PodTemplateSpec{
@@ -322,6 +323,7 @@ func buildRestoreJobSpec(job *dpv1alpha1.RestoreJob, resolved *resolvedRestoreEx
 	)
 	podSpec := buildRestorePodSpec(runtime, resolved.Addon, resolved.Storage, resolved.Snapshot, env)
 	return singleExecutionJobSpec(batchv1.JobSpec{
+		ActiveDeadlineSeconds:   cloneInt64Ptr(runtime.ActiveDeadlineSeconds),
 		BackoffLimit:            defaultJobBackoffLimit(),
 		TTLSecondsAfterFinished: cloneInt32Ptr(runtime.TTLSecondsAfterFinished),
 		Template: corev1.PodTemplateSpec{
@@ -797,9 +799,9 @@ func shellCommand(command, args []string, workingDir string) string {
 	case len(command) > 0:
 		parts := append([]string{}, command...)
 		parts = append(parts, args...)
-		lines = append(lines, "exec "+strings.Join(shellQuoteSlice(parts), " "))
+		lines = append(lines, strings.Join(shellQuoteSlice(parts), " "))
 	case len(args) > 0:
-		lines = append(lines, "exec "+strings.Join(shellQuoteSlice(args), " "))
+		lines = append(lines, strings.Join(shellQuoteSlice(args), " "))
 	default:
 		lines = append(lines, "echo '[ERROR] addon template requires command or args'; exit 1")
 	}
@@ -918,6 +920,9 @@ func storageVolumeMounts(storage *dpv1alpha1.BackupStorage) []corev1.VolumeMount
 }
 
 func defaultJobRuntime(runtime dpv1alpha1.JobRuntimeSpec) dpv1alpha1.JobRuntimeSpec {
+	if runtime.ActiveDeadlineSeconds == nil {
+		runtime.ActiveDeadlineSeconds = defaultJobActiveDeadlineSeconds()
+	}
 	if runtime.TTLSecondsAfterFinished == nil {
 		runtime.TTLSecondsAfterFinished = defaultJobTTLSeconds()
 	}
@@ -943,6 +948,9 @@ func mergeJobRuntime(runtime dpv1alpha1.JobRuntimeSpec, policy *dpv1alpha1.Backu
 	}
 	if runtime.Resources.Requests != nil || runtime.Resources.Limits != nil {
 		merged.Resources = runtime.Resources
+	}
+	if runtime.ActiveDeadlineSeconds != nil {
+		merged.ActiveDeadlineSeconds = cloneInt64Ptr(runtime.ActiveDeadlineSeconds)
 	}
 	if runtime.TTLSecondsAfterFinished != nil {
 		merged.TTLSecondsAfterFinished = cloneInt32Ptr(runtime.TTLSecondsAfterFinished)
