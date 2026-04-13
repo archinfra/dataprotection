@@ -1,3 +1,11 @@
+# NOTE:
+# This file is a development-only manual example.
+# If you have already installed the MySQL addon package with:
+#   ./dataprotection-addon-mysql-<arch>.run install
+# then DO NOT apply this file again.
+# The addon package already installs BackupAddon/mysql-dump and renders
+# the runner image to your target registry. This sample keeps a public
+# mysql:8.0.45 image only for template reading and manual debugging.
 apiVersion: dataprotection.archinfra.io/v1alpha1
 kind: BackupAddon
 metadata:

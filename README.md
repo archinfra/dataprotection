@@ -189,8 +189,42 @@ kubectl logs -n data-protection-system deploy/data-protection-operator-controlle
 
 你现在最快的上手方式，其实就是直接跟着 `config/samples/quickstart` 跑。
 
+先强调一个关键约定：
+
+**标准使用路径里，mysql addon `.run` 包已经负责安装 `BackupAddon/mysql-dump`。**
+
+所以：
+
+- 如果你已经执行了 `./dataprotection-addon-mysql-amd64.run install`
+  就不要再手工 apply `01-backupaddon-mysql.yaml`
+- `01-backupaddon-mysql.yaml`
+  只应该用于开发调试、样例阅读，或者没有使用 addon `.run` 包时的手工模式
+
+推荐的标准顺序应该是：
+
+1. 安装 core operator
+2. 安装 mysql addon `.run` 包
+3. 再 apply quickstart 里除了 `01-backupaddon-mysql.yaml` 之外的资源
+
+标准路径示例：
+
+```bash
+./data-protection-operator-amd64.run install -y
+./dataprotection-addon-mysql-amd64.run install -y
+
+kubectl apply -f config/samples/quickstart/00-namespace-secrets.yaml
+kubectl apply -f config/samples/quickstart/02-backupsource-mysql.yaml
+kubectl apply -f config/samples/quickstart/03-backupstorage-minio.yaml
+kubectl apply -f config/samples/quickstart/04-backupstorage-nfs.yaml
+kubectl apply -f config/samples/quickstart/05-retentionpolicy.yaml
+kubectl apply -f config/samples/quickstart/06-notificationendpoint.yaml
+kubectl apply -f config/samples/quickstart/07-backuppolicy-minio-every-3m.yaml
+kubectl apply -f config/samples/quickstart/08-backupjob-manual-nfs.yaml
+```
+
 样例文件：
 
+- [quickstart/README.zh-CN.md](C:/Users/yuanyp8/Desktop/archinfra/data-protection-operator/config/samples/quickstart/README.zh-CN.md)
 - [00-namespace-secrets.yaml](C:/Users/yuanyp8/Desktop/archinfra/data-protection-operator/config/samples/quickstart/00-namespace-secrets.yaml)
 - [01-backupaddon-mysql.yaml](C:/Users/yuanyp8/Desktop/archinfra/data-protection-operator/config/samples/quickstart/01-backupaddon-mysql.yaml)
 - [02-backupsource-mysql.yaml](C:/Users/yuanyp8/Desktop/archinfra/data-protection-operator/config/samples/quickstart/02-backupsource-mysql.yaml)
@@ -238,24 +272,28 @@ kubectl -n backup-system create secret generic mysql-runtime-auth \
   --from-literal=password='<MYSQL_PASSWORD>'
 ```
 
-### 7.2 创建 MySQL addon
+### 7.2 安装或确认 MySQL addon
 
-可以直接用：
+标准路径里，这一步应该使用 mysql addon `.run` 包：
+
+```bash
+./dataprotection-addon-mysql-amd64.run install -y
+kubectl get ba
+kubectl get backupaddon mysql-dump -o yaml
+```
+
+mysql addon 包负责的事情是：
+
+1. 导入并推送 mysql addon runner image
+2. 渲染并安装 `BackupAddon/mysql-dump`
+
+所以正常情况下，使用者不应该再手工指定 `backupTemplate.image` 或 `restoreTemplate.image`。
+
+下面这个文件：
 
 - [01-backupaddon-mysql.yaml](C:/Users/yuanyp8/Desktop/archinfra/data-protection-operator/config/samples/quickstart/01-backupaddon-mysql.yaml)
 
-它的核心逻辑是：
-
-- 备份时执行 `mysqldump`
-- 把结果写到 `/workspace/output/dump.sql`
-- 恢复时从 `/workspace/input/dump.sql` 导入
-
-应用：
-
-```bash
-kubectl apply -f config/samples/quickstart/01-backupaddon-mysql.yaml
-kubectl get ba
-```
+只保留给开发调试、模板阅读、或者没有 addon `.run` 包时的手工模式使用。
 
 ### 7.3 创建 MySQL source
 
