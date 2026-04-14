@@ -8,10 +8,10 @@
 
 ## 已经完成的部分
 
-- `BackupSource`、`BackupStorage`、`BackupPolicy`、`BackupRun`、`Snapshot`、`RestoreRequest`、`RetentionPolicy` 都有 API、CRD 和状态字段
+- `BackupSource`、`BackupStorage`、`BackupPolicy`、`BackupRun`、`Snapshot`、`RestoreJob`、`RetentionPolicy` 都有 API、CRD 和状态字段
 - `BackupPolicy -> CronJob -> BackupRun -> Job` 调度模型已经落地
 - `BackupRun -> Snapshot` 历史沉淀已经落地
-- `RestoreRequest` 已经优先按 `snapshotRef` 恢复
+- `RestoreJob` 已经支持按 `snapshotRef` 或 `importSource` 恢复
 - MySQL 内建 runtime 已支持 NFS、S3/MinIO、按库、按表、恢复、校验和 retention
 - 离线 `.run` 安装器和 GitHub Actions 发版链路已经接上
 
@@ -46,9 +46,11 @@ BackupPolicy -> CronJob -> BackupRun -> Job
 
 这让后续做审计、统计、失败重试、补跑都更自然。
 
-### 3. `Snapshot` 是恢复入口
+### 3. `Snapshot` 是标准恢复入口，但不是唯一入口
 
-恢复优先按 `snapshotRef` 做，而不是手工拼 storage path。
+平台内标准恢复仍优先按 `snapshotRef` 做，而不是手工拼 storage path。
+
+同时，为了适配 `A` 集群离线导出、`B` 集群导入恢复，当前也支持通过 `importSource` 直接引用 `BackupStorage` 中的离线包、目录或单文件。
 
 ## 当前边界
 

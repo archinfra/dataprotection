@@ -25,7 +25,7 @@ BackupPolicy -> CronJob -> BackupRun -> Job
 
 - `BackupStorage` 作为可复用存储后端
 - `Snapshot` 作为独立备份资产
-- `RestoreRequest` 优先按 `snapshotRef` 恢复
+- `RestoreJob` 同时支持按 `snapshotRef` 和 `importSource` 恢复
 
 ## 主要原因
 

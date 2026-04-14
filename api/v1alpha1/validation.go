@@ -3,6 +3,7 @@ package v1alpha1
 import (
 	"fmt"
 	"net/url"
+	"path"
 	"sort"
 	"strings"
 
@@ -123,8 +124,17 @@ func (s *RestoreJobSpec) ValidateBasic() error {
 	if strings.TrimSpace(s.SourceRef.Name) == "" {
 		return fmt.Errorf("spec.sourceRef.name is required")
 	}
-	if strings.TrimSpace(s.SnapshotRef.Name) == "" {
-		return fmt.Errorf("spec.snapshotRef.name is required")
+	snapshotSpecified := strings.TrimSpace(s.SnapshotRef.Name) != ""
+	importSpecified := s.ImportSource != nil
+	switch {
+	case snapshotSpecified && importSpecified:
+		return fmt.Errorf("spec.snapshotRef and spec.importSource are mutually exclusive")
+	case !snapshotSpecified && !importSpecified:
+		return fmt.Errorf("one of spec.snapshotRef.name or spec.importSource must be set")
+	case importSpecified:
+		if err := s.ImportSource.ValidateBasic("spec.importSource"); err != nil {
+			return err
+		}
 	}
 	if hasDuplicateLocalObjectReferenceNames(s.NotificationRefs) {
 		return fmt.Errorf("spec.notificationRefs contains duplicate names")
@@ -133,6 +143,35 @@ func (s *RestoreJobSpec) ValidateBasic() error {
 		return fmt.Errorf("spec.secretRefs contains duplicate names")
 	}
 	return s.JobRuntime.ValidateBasic()
+}
+
+func (s *RestoreImportSource) ValidateBasic(field string) error {
+	if s == nil {
+		return fmt.Errorf("%s is required", field)
+	}
+	if strings.TrimSpace(s.StorageRef.Name) == "" {
+		return fmt.Errorf("%s.storageRef.name is required", field)
+	}
+	rawPath := strings.TrimSpace(strings.ReplaceAll(s.Path, "\\", "/"))
+	if rawPath == "" {
+		return fmt.Errorf("%s.path is required", field)
+	}
+	if path.IsAbs(rawPath) {
+		return fmt.Errorf("%s.path must be relative to the storage root", field)
+	}
+	normalized := s.NormalizedPath()
+	if normalized == "" {
+		return fmt.Errorf("%s.path is required", field)
+	}
+	if normalized == ".." || strings.HasPrefix(normalized, "../") {
+		return fmt.Errorf("%s.path must stay within the storage root", field)
+	}
+	switch s.EffectiveFormat() {
+	case RestoreArtifactFormatAuto, RestoreArtifactFormatArchive, RestoreArtifactFormatFilesystem:
+	default:
+		return fmt.Errorf("%s.format must be one of auto, archive, filesystem", field)
+	}
+	return nil
 }
 
 func (s *RetentionPolicySpec) ValidateBasic() error {

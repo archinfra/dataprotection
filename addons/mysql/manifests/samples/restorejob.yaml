@@ -8,6 +8,11 @@ spec:
     name: mysql-prod
   snapshotRef:
     name: replace-with-snapshot-name
+  # importSource:
+  #   storageRef:
+  #     name: nfs-primary
+  #   path: imports/cluster-a/mysql-prod.tgz
+  #   format: auto
   notificationRefs:
     - name: ops-webhook
   reason: restore mysql snapshot

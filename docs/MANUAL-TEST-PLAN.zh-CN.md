@@ -4,7 +4,7 @@
 
 - 不再使用 `BackupRepository`
 - 调度模型为 `BackupPolicy -> CronJob -> BackupRun -> Job`
-- 恢复优先使用 `Snapshot`
+- 恢复使用 `RestoreJob`，可按 `snapshotRef` 或 `importSource`
 - `BackupPolicy` 调度身份由控制器自动在业务 namespace 下创建
 
 ## 测试目标
@@ -15,7 +15,7 @@
 4. `CronJob` 能自动创建 `BackupRun`
 5. `BackupRun` 能创建数据 `Job`
 6. `BackupRun` 成功后能沉淀 `Snapshot`
-7. `RestoreRequest` 能按 `snapshotRef` 恢复
+7. `RestoreJob` 能按 `snapshotRef` 或 `importSource` 恢复
 8. S3/MinIO 缺 bucket 时能自动创建
 9. NFS 场景能正常写入和恢复
 10. `Forbid / Replace` 并发策略真正作用到 `BackupRun`
@@ -179,11 +179,11 @@ spec:
   reason: manual smoke backup
 ```
 
-### 8. RestoreRequest
+### 8. RestoreJob
 
 ```yaml
 apiVersion: dataprotection.archinfra.io/v1alpha1
-kind: RestoreRequest
+kind: RestoreJob
 metadata:
   name: mysql-smoke-restore
   namespace: backup-system
@@ -192,11 +192,13 @@ spec:
     name: mysql-smoke
   snapshotRef:
     name: mysql-smoke-manual-minio-primary-snapshot
-  target:
-    mode: InPlace
-    driverConfig:
-      mysql:
-        restoreMode: merge
+  # importSource:
+  #   storageRef:
+  #     name: nfs-primary
+  #   path: imports/cluster-a/mysql-smoke.tgz
+  #   format: auto
+  #   snapshot: mysql-smoke-cluster-a-export
+  #   series: import/cluster-a/mysql-smoke
 ```
 
 ## 建议测试顺序
@@ -208,9 +210,10 @@ spec:
 5. 手工创建一个 `BackupRun`，确认生成备份 `Job`
 6. 观察备份成功后生成 `Snapshot`
 7. 等待一次定时调度，确认 `CronJob` 能自动创建 `BackupRun`
-8. 用 `snapshotRef` 创建 `RestoreRequest`
-9. 再补测 NFS 场景
-10. 再补测 MinIO bucket 不存在时的自动创建
+8. 用 `snapshotRef` 创建 `RestoreJob`
+9. 再用导入包补测一次 `importSource` 恢复
+10. 再补测 NFS 场景
+11. 再补测 MinIO bucket 不存在时的自动创建
 
 ## 关键观察命令
 
@@ -230,7 +233,7 @@ kubectl get retentionpolicy -n backup-system
 kubectl get backuppolicy -n backup-system
 kubectl get backuprun -n backup-system
 kubectl get snapshot -n backup-system
-kubectl get restorerequest -n backup-system
+kubectl get restorejob -n backup-system
 ```
 
 ### 调度身份与定时资源
@@ -353,10 +356,12 @@ kubectl logs -n backup-system <pod-name> -c s3-download
 做法：
 
 - 先等待 `Snapshot` 生成
-- 使用 `snapshotRef` 创建 `RestoreRequest`
+- 使用 `snapshotRef` 创建一个 `RestoreJob`
+- 再把离线导出包放到 `BackupStorage` 对应路径，用 `importSource` 创建第二个 `RestoreJob`
 
 预期：
 
+- 两种恢复模式至少各跑通一次
 - 生成 restore Job
 - restore Job 成功
 - 目标 MySQL 数据恢复
@@ -367,5 +372,5 @@ kubectl logs -n backup-system <pod-name> -c s3-download
 
 - 可维护的调度模型
 - 可审计的执行历史
-- 可恢复的快照模型
+- 可恢复的快照与导入包模型
 - MySQL alpha 级真实数据面

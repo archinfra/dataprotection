@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,6 +28,7 @@ const (
 	addonNameLabel             = "dataprotection.archinfra.io/addon-name"
 	seriesAnnotation           = "dataprotection.archinfra.io/series"
 	backendPathAnnotation      = "dataprotection.archinfra.io/backend-path"
+	importPathAnnotation       = "dataprotection.archinfra.io/import-path"
 	notificationRefsAnnotation = "dataprotection.archinfra.io/notification-refs"
 	managedByValue             = "data-protection-operator"
 )
@@ -43,10 +45,86 @@ type resolvedBackupExecution struct {
 }
 
 type resolvedRestoreExecution struct {
-	Source   *dpv1alpha1.BackupSource
-	Addon    *dpv1alpha1.BackupAddon
-	Storage  *dpv1alpha1.BackupStorage
-	Snapshot *dpv1alpha1.Snapshot
+	Source       *dpv1alpha1.BackupSource
+	Addon        *dpv1alpha1.BackupAddon
+	Storage      *dpv1alpha1.BackupStorage
+	Snapshot     *dpv1alpha1.Snapshot
+	ImportSource *dpv1alpha1.RestoreImportSource
+}
+
+func (r *resolvedRestoreExecution) usesSnapshot() bool {
+	return r != nil && r.Snapshot != nil
+}
+
+func (r *resolvedRestoreExecution) artifactPath() string {
+	if r == nil {
+		return ""
+	}
+	if r.usesSnapshot() {
+		return path.Join(r.Snapshot.Spec.BackendPath, "snapshots", r.Snapshot.Spec.Snapshot+".tgz")
+	}
+	if r.ImportSource == nil {
+		return ""
+	}
+	return r.ImportSource.NormalizedPath()
+}
+
+func (r *resolvedRestoreExecution) artifactFormat() dpv1alpha1.RestoreArtifactFormat {
+	if r == nil || r.usesSnapshot() {
+		return dpv1alpha1.RestoreArtifactFormatArchive
+	}
+	return r.ImportSource.EffectiveFormat()
+}
+
+func (r *resolvedRestoreExecution) backendPath() string {
+	if r == nil {
+		return ""
+	}
+	if r.usesSnapshot() {
+		return r.Snapshot.Spec.BackendPath
+	}
+	return r.artifactPath()
+}
+
+func (r *resolvedRestoreExecution) series() string {
+	if r == nil {
+		return ""
+	}
+	if r.usesSnapshot() {
+		return r.Snapshot.Spec.Series
+	}
+	if series := trimString(r.ImportSource.Series); series != "" {
+		return series
+	}
+	return strings.Join([]string{
+		"import",
+		"source",
+		dpv1alpha1.BuildLabelValue(r.Source.Namespace),
+		dpv1alpha1.BuildLabelValue(r.Source.Name),
+		"storage",
+		dpv1alpha1.BuildLabelValue(r.Storage.Name),
+	}, "/")
+}
+
+func (r *resolvedRestoreExecution) snapshotName() string {
+	if r == nil {
+		return ""
+	}
+	if r.usesSnapshot() {
+		return r.Snapshot.Spec.Snapshot
+	}
+	return trimString(r.ImportSource.EffectiveSnapshotName())
+}
+
+func (r *resolvedRestoreExecution) notificationAttributes() map[string]string {
+	if r == nil || r.usesSnapshot() {
+		return nil
+	}
+	return map[string]string{
+		"restoreSource": "importSource",
+		"importPath":    r.artifactPath(),
+		"importFormat":  string(r.artifactFormat()),
+	}
 }
 
 func resolvePolicyDependencies(ctx context.Context, c client.Client, policy *dpv1alpha1.BackupPolicy) (*dpv1alpha1.BackupSource, *dpv1alpha1.BackupAddon, []*dpv1alpha1.BackupStorage, *dpv1alpha1.RetentionPolicy, error) {
@@ -123,15 +201,29 @@ func resolveRestoreJobDependencies(ctx context.Context, c client.Client, job *dp
 	if err != nil {
 		return nil, err
 	}
-	snapshot, err := getSnapshot(ctx, c, job.Namespace, job.Spec.SnapshotRef.Name)
+	if snapshotName := trimString(job.Spec.SnapshotRef.Name); snapshotName != "" {
+		snapshot, err := getSnapshot(ctx, c, job.Namespace, snapshotName)
+		if err != nil {
+			return nil, err
+		}
+		storage, err := getBackupStorage(ctx, c, job.Namespace, snapshot.Spec.StorageRef.Name)
+		if err != nil {
+			return nil, err
+		}
+		return &resolvedRestoreExecution{Source: source, Addon: addon, Storage: storage, Snapshot: snapshot}, nil
+	}
+	importSource := *job.Spec.ImportSource
+	importSource.Path = job.Spec.ImportSource.NormalizedPath()
+	storage, err := getBackupStorage(ctx, c, job.Namespace, importSource.StorageRef.Name)
 	if err != nil {
 		return nil, err
 	}
-	storage, err := getBackupStorage(ctx, c, job.Namespace, snapshot.Spec.StorageRef.Name)
-	if err != nil {
-		return nil, err
-	}
-	return &resolvedRestoreExecution{Source: source, Addon: addon, Storage: storage, Snapshot: snapshot}, nil
+	return &resolvedRestoreExecution{
+		Source:       source,
+		Addon:        addon,
+		Storage:      storage,
+		ImportSource: &importSource,
+	}, nil
 }
 
 func resolveRetentionPolicy(ctx context.Context, c client.Client, namespace, name string) (*dpv1alpha1.RetentionPolicy, error) {
@@ -306,9 +398,12 @@ func buildRestoreJobSpec(job *dpv1alpha1.RestoreJob, resolved *resolvedRestoreEx
 	labels := managedResourceLabels("RestoreJob", job.Name, "restore", resolved.Source.Name, resolved.Storage.Name)
 	labels[addonNameLabel] = dpv1alpha1.BuildLabelValue(resolved.Addon.Name)
 	annotations := map[string]string{
-		seriesAnnotation:           resolved.Snapshot.Spec.Series,
-		backendPathAnnotation:      resolved.Snapshot.Spec.BackendPath,
+		seriesAnnotation:           resolved.series(),
+		backendPathAnnotation:      resolved.backendPath(),
 		notificationRefsAnnotation: notificationRefNames(job.Spec.NotificationRefs),
+	}
+	if !resolved.usesSnapshot() {
+		annotations[importPathAnnotation] = resolved.artifactPath()
 	}
 	env := buildSourceEnvWithSecretRefs(mergeRestoreEndpoint(resolved.Source, job), mergeRestoreSecretRefs(resolved.Source, job))
 	env = append(env, buildTargetEnv(mergeRestoreTargetRef(resolved.Source, job))...)
@@ -317,11 +412,13 @@ func buildRestoreJobSpec(job *dpv1alpha1.RestoreJob, resolved *resolvedRestoreEx
 		corev1.EnvVar{Name: "DP_OPERATION", Value: "restore"},
 		corev1.EnvVar{Name: "DP_WORKSPACE_INPUT", Value: "/workspace/input"},
 		corev1.EnvVar{Name: "DP_STATUS_DIR", Value: "/workspace/status"},
-		corev1.EnvVar{Name: "DP_SNAPSHOT", Value: resolved.Snapshot.Spec.Snapshot},
-		corev1.EnvVar{Name: "DP_BACKEND_PATH", Value: resolved.Snapshot.Spec.BackendPath},
-		corev1.EnvVar{Name: "DP_SERIES", Value: resolved.Snapshot.Spec.Series},
+		corev1.EnvVar{Name: "DP_SNAPSHOT", Value: resolved.snapshotName()},
+		corev1.EnvVar{Name: "DP_BACKEND_PATH", Value: resolved.backendPath()},
+		corev1.EnvVar{Name: "DP_SERIES", Value: resolved.series()},
+		corev1.EnvVar{Name: "DP_ARTIFACT_PATH", Value: resolved.artifactPath()},
+		corev1.EnvVar{Name: "DP_IMPORT_FORMAT", Value: string(resolved.artifactFormat())},
 	)
-	podSpec := buildRestorePodSpec(runtime, resolved.Addon, resolved.Storage, resolved.Snapshot, env)
+	podSpec := buildRestorePodSpec(runtime, resolved, env)
 	return singleExecutionJobSpec(batchv1.JobSpec{
 		ActiveDeadlineSeconds:   cloneInt64Ptr(runtime.ActiveDeadlineSeconds),
 		BackoffLimit:            defaultJobBackoffLimit(),
@@ -338,6 +435,7 @@ func buildRestoreJobSpec(job *dpv1alpha1.RestoreJob, resolved *resolvedRestoreEx
 
 func buildBackupPodSpec(runtime dpv1alpha1.JobRuntimeSpec, source *dpv1alpha1.BackupSource, addon *dpv1alpha1.BackupAddon, storage *dpv1alpha1.BackupStorage, env []corev1.EnvVar) corev1.PodSpec {
 	env = mergeEnvVars(env, buildAddonParameterEnv(source))
+	storageEnv := mergeEnvVars(buildStorageEnv(storage), env)
 	volumes := []corev1.Volume{
 		{Name: "workspace-output", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 		{Name: "workspace-status", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
@@ -360,34 +458,35 @@ func buildBackupPodSpec(runtime dpv1alpha1.JobRuntimeSpec, source *dpv1alpha1.Ba
 		NodeSelector:       copyStringMap(runtime.NodeSelector),
 		Tolerations:        cloneTolerations(runtime.Tolerations),
 		Volumes:            volumes,
-		InitContainers:     []corev1.Container{buildStoragePreflightContainer(storage)},
+		InitContainers:     []corev1.Container{buildBackupStoragePreflightContainer(storage, storageEnv)},
 		Containers: []corev1.Container{
 			buildAddonBackupContainer(addon, runtime, env),
 			buildArtifactPackageContainer(env),
-			buildArtifactUploadContainer(storage, env),
+			buildArtifactUploadContainer(storage, storageEnv),
 		},
 	}
 }
 
-func buildRestorePodSpec(runtime dpv1alpha1.JobRuntimeSpec, addon *dpv1alpha1.BackupAddon, storage *dpv1alpha1.BackupStorage, snapshot *dpv1alpha1.Snapshot, env []corev1.EnvVar) corev1.PodSpec {
+func buildRestorePodSpec(runtime dpv1alpha1.JobRuntimeSpec, resolved *resolvedRestoreExecution, env []corev1.EnvVar) corev1.PodSpec {
+	storageEnv := mergeEnvVars(buildStorageEnv(resolved.Storage), env)
 	volumes := []corev1.Volume{
 		{Name: "workspace-input", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 		{Name: "workspace-status", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 	}
-	if storage.Spec.Type == dpv1alpha1.StorageTypeNFS {
+	if resolved.Storage.Spec.Type == dpv1alpha1.StorageTypeNFS {
 		volumes = append(volumes, corev1.Volume{
 			Name: "backend-storage",
 			VolumeSource: corev1.VolumeSource{
 				NFS: &corev1.NFSVolumeSource{
-					Server: storage.Spec.NFS.Server,
-					Path:   storage.Spec.NFS.Path,
+					Server: resolved.Storage.Spec.NFS.Server,
+					Path:   resolved.Storage.Spec.NFS.Path,
 				},
 			},
 		})
 	}
-	restoreTemplate := addon.Spec.BackupTemplate
-	if addon.Spec.RestoreTemplate != nil {
-		restoreTemplate = *addon.Spec.RestoreTemplate
+	restoreTemplate := resolved.Addon.Spec.BackupTemplate
+	if resolved.Addon.Spec.RestoreTemplate != nil {
+		restoreTemplate = *resolved.Addon.Spec.RestoreTemplate
 	}
 	command := addonWrappedCommand(restoreTemplate.Command, restoreTemplate.Args, restoreTemplate.WorkingDir, "/workspace/status/restore.done", "/workspace/status/restore.failed")
 	return corev1.PodSpec{
@@ -398,8 +497,8 @@ func buildRestorePodSpec(runtime dpv1alpha1.JobRuntimeSpec, addon *dpv1alpha1.Ba
 		Tolerations:        cloneTolerations(runtime.Tolerations),
 		Volumes:            volumes,
 		InitContainers: []corev1.Container{
-			buildStoragePreflightContainer(storage),
-			buildArtifactDownloadContainer(storage, snapshot),
+			buildRestoreStoragePreflightContainer(resolved.Storage, storageEnv),
+			buildArtifactDownloadContainer(resolved, storageEnv),
 		},
 		Containers: []corev1.Container{{
 			Name:            "addon-restore",
@@ -418,12 +517,12 @@ func buildRestorePodSpec(runtime dpv1alpha1.JobRuntimeSpec, addon *dpv1alpha1.Ba
 	}
 }
 
-func buildStoragePreflightContainer(storage *dpv1alpha1.BackupStorage) corev1.Container {
+func buildBackupStoragePreflightContainer(storage *dpv1alpha1.BackupStorage, env []corev1.EnvVar) corev1.Container {
 	image := defaultUtilityImage()
-	script := buildNFSPreflightScript()
+	script := buildNFSBackupPreflightScript()
 	if storage.Spec.Type == dpv1alpha1.StorageTypeMinIO {
 		image = defaultMinIOHelperImage()
-		script = buildMinIOPreflightScript()
+		script = buildMinIOBackupPreflightScript()
 	}
 	return corev1.Container{
 		Name:            "storage-preflight",
@@ -431,7 +530,25 @@ func buildStoragePreflightContainer(storage *dpv1alpha1.BackupStorage) corev1.Co
 		ImagePullPolicy: defaultImagePullPolicy(image),
 		Command:         []string{"/bin/sh", "-ceu"},
 		Args:            []string{script},
-		Env:             buildStorageEnv(storage),
+		Env:             env,
+		VolumeMounts:    storageVolumeMounts(storage),
+	}
+}
+
+func buildRestoreStoragePreflightContainer(storage *dpv1alpha1.BackupStorage, env []corev1.EnvVar) corev1.Container {
+	image := defaultUtilityImage()
+	script := buildNFSRestorePreflightScript()
+	if storage.Spec.Type == dpv1alpha1.StorageTypeMinIO {
+		image = defaultMinIOHelperImage()
+		script = buildMinIORestorePreflightScript()
+	}
+	return corev1.Container{
+		Name:            "storage-preflight",
+		Image:           image,
+		ImagePullPolicy: defaultImagePullPolicy(image),
+		Command:         []string{"/bin/sh", "-ceu"},
+		Args:            []string{script},
+		Env:             env,
 		VolumeMounts:    storageVolumeMounts(storage),
 	}
 }
@@ -489,7 +606,7 @@ func buildArtifactPackageContainer(env []corev1.EnvVar) corev1.Container {
 		ImagePullPolicy: defaultImagePullPolicy(defaultUtilityImage()),
 		Command:         []string{"/bin/sh", "-ceu"},
 		Args:            []string{script},
-		Env:             mergeEnvVars(env),
+		Env:             env,
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: "workspace-output", MountPath: "/workspace/output"},
 			{Name: "workspace-status", MountPath: "/workspace/status"},
@@ -510,19 +627,20 @@ func buildArtifactUploadContainer(storage *dpv1alpha1.BackupStorage, env []corev
 		ImagePullPolicy: defaultImagePullPolicy(image),
 		Command:         []string{"/bin/sh", "-ceu"},
 		Args:            []string{script},
-		Env:             mergeEnvVars(env, buildStorageEnv(storage)),
+		Env:             env,
 		VolumeMounts: append([]corev1.VolumeMount{
 			{Name: "workspace-status", MountPath: "/workspace/status"},
 		}, storageVolumeMounts(storage)...),
 	}
 }
 
-func buildArtifactDownloadContainer(storage *dpv1alpha1.BackupStorage, snapshot *dpv1alpha1.Snapshot) corev1.Container {
+func buildArtifactDownloadContainer(resolved *resolvedRestoreExecution, env []corev1.EnvVar) corev1.Container {
+	storage := resolved.Storage
 	image := defaultUtilityImage()
-	script := buildNFSDownloadScript(snapshot.Spec.Snapshot)
+	script := buildNFSDownloadScript(resolved.artifactPath(), resolved.artifactFormat())
 	if storage.Spec.Type == dpv1alpha1.StorageTypeMinIO {
 		image = defaultMinIOHelperImage()
-		script = buildMinIODownloadScript(snapshot.Spec.Snapshot)
+		script = buildMinIODownloadScript(resolved.artifactPath(), resolved.artifactFormat())
 	}
 	return corev1.Container{
 		Name:            "artifact-download",
@@ -530,7 +648,7 @@ func buildArtifactDownloadContainer(storage *dpv1alpha1.BackupStorage, snapshot 
 		ImagePullPolicy: defaultImagePullPolicy(image),
 		Command:         []string{"/bin/sh", "-ceu"},
 		Args:            []string{script},
-		Env:             buildStorageEnv(storage),
+		Env:             env,
 		VolumeMounts: append([]corev1.VolumeMount{
 			{Name: "workspace-input", MountPath: "/workspace/input"},
 			{Name: "workspace-status", MountPath: "/workspace/status"},
@@ -618,7 +736,7 @@ func buildAddonParameterEnvFromMap(parameters map[string]string) []corev1.EnvVar
 	return env
 }
 
-func buildNFSPreflightScript() string {
+func buildNFSBackupPreflightScript() string {
 	return strings.Join([]string{
 		"set -eu",
 		"base=\"/backend/${DP_BACKEND_PATH}\"",
@@ -630,7 +748,7 @@ func buildNFSPreflightScript() string {
 	}, "\n")
 }
 
-func buildMinIOPreflightScript() string {
+func buildMinIOBackupPreflightScript() string {
 	return strings.Join([]string{
 		"set -eu",
 		"mc_cmd() {",
@@ -656,6 +774,37 @@ func buildMinIOPreflightScript() string {
 		"mc_cmd cp /tmp/dp-probe \"${probe}\" >/dev/null",
 		"mc_cmd rm \"${probe}\" >/dev/null",
 		"printf '%s' '" + marshalTerminationSummary(podExecutionSummary{StorageProbe: &storageProbeSummary{Result: dpv1alpha1.ProbeResultSucceeded, Message: "minio backend is reachable"}}) + "' > /dev/termination-log",
+	}, "\n")
+}
+
+func buildNFSRestorePreflightScript() string {
+	return strings.Join([]string{
+		"set -eu",
+		"artifact=\"/backend/${DP_ARTIFACT_PATH}\"",
+		"[ -e \"$artifact\" ] || { echo '[ERROR] restore artifact path not found on nfs backend'; exit 1; }",
+		"printf '%s' '" + marshalTerminationSummary(podExecutionSummary{StorageProbe: &storageProbeSummary{Result: dpv1alpha1.ProbeResultSucceeded, Message: "nfs restore artifact is reachable"}}) + "' > /dev/termination-log",
+	}, "\n")
+}
+
+func buildMinIORestorePreflightScript() string {
+	return strings.Join([]string{
+		"set -eu",
+		"mc_cmd() {",
+		"  if [ \"${DP_MINIO_INSECURE:-false}\" = \"true\" ]; then",
+		"    mc --insecure \"$@\"",
+		"  else",
+		"    mc \"$@\"",
+		"  fi",
+		"}",
+		"remote=\"backup/${DP_MINIO_BUCKET}\"",
+		"if [ -n \"${DP_MINIO_PREFIX:-}\" ]; then remote=\"${remote}/${DP_MINIO_PREFIX}\"; fi",
+		"remote=\"${remote}/${DP_ARTIFACT_PATH}\"",
+		"mc_cmd alias set backup \"${DP_MINIO_ENDPOINT}\" \"${DP_MINIO_ACCESS_KEY}\" \"${DP_MINIO_SECRET_KEY}\" >/dev/null",
+		"if ! mc_cmd stat \"$remote\" >/dev/null 2>&1 && ! mc_cmd ls \"$remote\" >/dev/null 2>&1; then",
+		"  echo '[ERROR] restore artifact path not found on minio backend'",
+		"  exit 1",
+		"fi",
+		"printf '%s' '" + marshalTerminationSummary(podExecutionSummary{StorageProbe: &storageProbeSummary{Result: dpv1alpha1.ProbeResultSucceeded, Message: "minio restore artifact is reachable"}}) + "' > /dev/termination-log",
 	}, "\n")
 }
 
@@ -744,23 +893,42 @@ func buildMinIOUploadScript() string {
 	}, "\n")
 }
 
-func buildNFSDownloadScript(snapshot string) string {
-	snapshot = shellQuote(snapshot)
+func buildNFSDownloadScript(artifactPath string, format dpv1alpha1.RestoreArtifactFormat) string {
+	artifactPath = shellQuote(artifactPath)
+	format = dpv1alpha1.RestoreArtifactFormat(strings.TrimSpace(string(format)))
 	return strings.Join([]string{
 		"set -eu",
-		"base=\"/backend/${DP_BACKEND_PATH}\"",
-		fmt.Sprintf("snapshot=%s", snapshot),
-		"archive=\"${base}/snapshots/${snapshot}.tgz\"",
-		"[ -f \"$archive\" ] || { echo '[ERROR] snapshot archive not found on nfs backend'; exit 1; }",
+		fmt.Sprintf("artifact_path=%s", artifactPath),
+		fmt.Sprintf("artifact_format=%s", shellQuote(string(format))),
 		"mkdir -p /workspace/input /workspace/status/restore",
-		"cp \"$archive\" /workspace/status/restore/snapshot.tgz",
-		"tar -xzf /workspace/status/restore/snapshot.tgz -C /workspace/input",
+		"artifact=\"/backend/${artifact_path}\"",
+		"if [ \"${artifact_format}\" = \"auto\" ]; then",
+		"  case \"$artifact_path\" in",
+		"    *.tgz|*.tar.gz|*.tar) artifact_format='archive' ;;",
+		"    *) artifact_format='filesystem' ;;",
+		"  esac",
+		"fi",
+		"if [ \"${artifact_format}\" = \"filesystem\" ]; then",
+		"  if [ -d \"$artifact\" ]; then",
+		"    cp -a \"$artifact\"/. /workspace/input/",
+		"  elif [ -f \"$artifact\" ]; then",
+		"    cp \"$artifact\" \"/workspace/input/$(basename \"$artifact\")\"",
+		"  else",
+		"    echo '[ERROR] restore artifact path not found on nfs backend'",
+		"    exit 1",
+		"  fi",
+		"else",
+		"  [ -f \"$artifact\" ] || { echo '[ERROR] restore archive not found on nfs backend'; exit 1; }",
+		"  cp \"$artifact\" /workspace/status/restore/source.tgz",
+		"  tar -xzf /workspace/status/restore/source.tgz -C /workspace/input",
+		"fi",
 		"printf '%s' '" + marshalTerminationSummary(podExecutionSummary{StorageProbe: &storageProbeSummary{Result: dpv1alpha1.ProbeResultSucceeded, Message: "artifact downloaded from nfs"}}) + "' > /dev/termination-log",
 	}, "\n")
 }
 
-func buildMinIODownloadScript(snapshot string) string {
-	snapshot = shellQuote(snapshot)
+func buildMinIODownloadScript(artifactPath string, format dpv1alpha1.RestoreArtifactFormat) string {
+	artifactPath = shellQuote(artifactPath)
+	format = dpv1alpha1.RestoreArtifactFormat(strings.TrimSpace(string(format)))
 	return strings.Join([]string{
 		"set -eu",
 		"mc_cmd() {",
@@ -770,14 +938,33 @@ func buildMinIODownloadScript(snapshot string) string {
 		"    mc \"$@\"",
 		"  fi",
 		"}",
-		fmt.Sprintf("snapshot=%s", snapshot),
+		fmt.Sprintf("artifact_path=%s", artifactPath),
+		fmt.Sprintf("artifact_format=%s", shellQuote(string(format))),
 		"remote_base=\"backup/${DP_MINIO_BUCKET}\"",
 		"if [ -n \"${DP_MINIO_PREFIX:-}\" ]; then remote_base=\"${remote_base}/${DP_MINIO_PREFIX}\"; fi",
-		"remote_base=\"${remote_base}/${DP_BACKEND_PATH}\"",
+		"artifact=\"${remote_base}/${artifact_path}\"",
 		"mc_cmd alias set backup \"${DP_MINIO_ENDPOINT}\" \"${DP_MINIO_ACCESS_KEY}\" \"${DP_MINIO_SECRET_KEY}\" >/dev/null",
 		"mkdir -p /workspace/input /workspace/status/restore",
-		"mc_cmd cp \"${remote_base}/snapshots/${snapshot}.tgz\" /workspace/status/restore/snapshot.tgz >/dev/null",
-		"tar -xzf /workspace/status/restore/snapshot.tgz -C /workspace/input",
+		"if [ \"${artifact_format}\" = \"auto\" ]; then",
+		"  case \"$artifact_path\" in",
+		"    *.tgz|*.tar.gz|*.tar) artifact_format='archive' ;;",
+		"    *) artifact_format='filesystem' ;;",
+		"  esac",
+		"fi",
+		"if [ \"${artifact_format}\" = \"filesystem\" ]; then",
+		"  if mc_cmd stat \"$artifact\" >/dev/null 2>&1; then",
+		"    file_name=\"$(basename \"$artifact_path\")\"",
+		"    mc_cmd cp \"$artifact\" \"/workspace/input/${file_name}\" >/dev/null",
+		"  elif mc_cmd ls \"$artifact\" >/dev/null 2>&1; then",
+		"    mc_cmd mirror --overwrite \"$artifact\" /workspace/input >/dev/null",
+		"  else",
+		"    echo '[ERROR] restore artifact path not found on minio backend'",
+		"    exit 1",
+		"  fi",
+		"else",
+		"  mc_cmd cp \"$artifact\" /workspace/status/restore/source.tgz >/dev/null",
+		"  tar -xzf /workspace/status/restore/source.tgz -C /workspace/input",
+		"fi",
 		"printf '%s' '" + marshalTerminationSummary(podExecutionSummary{StorageProbe: &storageProbeSummary{Result: dpv1alpha1.ProbeResultSucceeded, Message: "artifact downloaded from minio"}}) + "' > /dev/termination-log",
 	}, "\n")
 }

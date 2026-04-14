@@ -26,6 +26,10 @@ spec:
     - jsonPath: .spec.snapshotRef.name
       name: SnapshotRef
       type: string
+    - jsonPath: .spec.importSource.path
+      name: ImportPath
+      priority: 1
+      type: string
     - jsonPath: .status.completedAt
       name: Completed
       type: date
@@ -98,6 +102,40 @@ spec:
                     - key
                     - name
                     type: object
+                type: object
+              importSource:
+                properties:
+                  format:
+                    enum:
+                    - auto
+                    - archive
+                    - filesystem
+                    type: string
+                  path:
+                    type: string
+                  series:
+                    type: string
+                  snapshot:
+                    type: string
+                  storageRef:
+                    description: |-
+                      LocalObjectReference contains enough information to let you locate the
+                      referenced object inside the same namespace.
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
+                required:
+                - path
+                - storageRef
                 type: object
               jobRuntime:
                 properties:
@@ -308,7 +346,6 @@ spec:
                 - name
                 type: object
             required:
-            - snapshotRef
             - sourceRef
             type: object
           status:

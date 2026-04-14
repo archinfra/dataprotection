@@ -1,0 +1,18 @@
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: RestoreJob
+metadata:
+  name: mysql-smoke-import-restore
+  namespace: backup-system
+spec:
+  sourceRef:
+    name: mysql-smoke
+  importSource:
+    storageRef:
+      name: nfs-primary
+    path: imports/cluster-a/mysql-smoke.tgz
+    format: auto
+    snapshot: mysql-smoke-cluster-a-export
+    series: import/cluster-a/mysql-smoke
+  notificationRefs:
+    - name: ops-webhook
+  reason: restore mysql from an offline export package

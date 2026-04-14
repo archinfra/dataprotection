@@ -53,7 +53,7 @@ func (r *RestoreJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 		return requeueSoon(), nil
 	}
-	if resolved.Snapshot.Status.Phase != dpv1alpha1.ResourcePhaseSucceeded || !resolved.Snapshot.Status.ArtifactReady {
+	if resolved.usesSnapshot() && (resolved.Snapshot.Status.Phase != dpv1alpha1.ResourcePhaseSucceeded || !resolved.Snapshot.Status.ArtifactReady) {
 		restoreJob.Status.Phase = dpv1alpha1.ResourcePhaseFailed
 		restoreJob.Status.Message = "snapshot is not ready for restore"
 		markCondition(&restoreJob.Status.Conditions, "Ready", metav1.ConditionFalse, "SnapshotNotReady", restoreJob.Status.Message, restoreJob.Generation)
@@ -108,10 +108,11 @@ func (r *RestoreJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				Message:       observation.Message,
 				SourceName:    resolved.Source.Name,
 				StorageName:   resolved.Storage.Name,
-				SnapshotName:  resolved.Snapshot.Name,
+				SnapshotName:  resolved.snapshotName(),
 				NativeJobName: nativeJob.Name,
-				Series:        resolved.Snapshot.Spec.Series,
+				Series:        resolved.series(),
 				Timestamp:     nowTime().Time.Format(time.RFC3339),
+				Attributes:    resolved.notificationAttributes(),
 			}
 			restoreJob.Status.Notification, _ = dispatchNotifications(ctx, r.Client, restoreJob.Namespace, restoreJob.Spec.NotificationRefs, event)
 		}
