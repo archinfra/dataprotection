@@ -1,5 +1,9 @@
 # User Cases
 
+如果你已经完成 operator 安装，下一步要进入实际运维与演练，建议同时打开：
+
+- `docs/OPERATIONS-RUNBOOK.zh-CN.md`
+
 这份文档按“真实使用场景”来解释 `dataprotection` 当前适合怎么用。
 
 ## 场景 1：只把备份写到备份专用 MinIO

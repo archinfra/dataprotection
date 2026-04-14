@@ -1,244 +1,111 @@
 # dataprotection v2
 
-`dataprotection` v2 是一个面向 Kubernetes 的通用数据保护控制面。它不把“备份”做成某个中间件内部的脚本堆砌，而是把调度、存储、快照记录、通知、导入恢复和插件接入统一抽象出来，让 MySQL、MinIO、Milvus、Redis 这类数据面都可以接入同一套控制逻辑。
+`dataprotection` 是一套面向 Kubernetes 的通用数据保护控制面。
 
-## 当前已经具备的能力
+它把“备份脚本”从具体中间件安装流程里抽离出来，统一抽象成：
 
-- 统一备份接入模型：`BackupAddon` + `BackupSource`
-- 多种备份落点：`BackupStorage` 当前支持 `nfs` 和 `minio`
-- 定时备份：`BackupPolicy`
-- 手动单次备份：`BackupJob`
-- 平台内快照恢复：`RestoreJob.spec.snapshotRef`
+- 备份接入：`BackupAddon` + `BackupSource`
+- 备份后端：`BackupStorage`
+- 定时策略：`BackupPolicy`
+- 手动执行：`BackupJob`
+- 快照登记：`Snapshot`
+- 恢复入口：`RestoreJob`
+- 保留策略：`RetentionPolicy`
+- 通知回调：`NotificationEndpoint`
+
+当前这套控制面已经支持：
+
+- NFS 与 MinIO 两类备份后端
+- 平台内 `Snapshot` 恢复
 - 离线导入恢复：`RestoreJob.spec.importSource`
-- 备份保留策略：`RetentionPolicy`
-- Webhook 通知：`NotificationEndpoint`
-- 快照资产记录：`Snapshot`
-- 多存储 fan-out：一个 `BackupPolicy` 可以同时写入多个 `BackupStorage`
-- 后端清理联动：保留策略不仅清理 `Snapshot` CR，也会清理 MinIO / NFS 上过期的归档文件
+- 多后端 fan-out：一个策略同时写多个 `BackupStorage`
+- 删除过期 `Snapshot` 时同步清理 MinIO / NFS 后端归档文件
 
-## 核心资源模型
+## 推荐理解方式
 
-### `BackupAddon`
+更推荐把这个项目理解为“平台级数据保护能力”，而不是“某一个中间件的备份脚本合集”。
 
-定义某一类数据源如何执行“备份”和“恢复”容器逻辑。
+- `core/operator` 负责调度、打包、上传、下载、保留、通知
+- `addon` 只负责具体中间件的数据导出与导入
+- 中间件项目可以在安装阶段自动注册自己的 `BackupAddon / BackupSource / BackupPolicy`
 
-职责边界：
+## 当前支持矩阵
 
-- 备份时把结果写到 `/workspace/output`
-- 恢复时从 `/workspace/input` 读取内容
-- 不直接负责上传 NFS / MinIO，也不直接负责保留策略
+`dataprotection` core 当前可以承载任意自定义 addon，但这个仓库随附的官方 addon 交付物只覆盖下面几类：
 
-### `BackupSource`
+| 中间件 | addon 状态 | 说明 |
+| --- | --- | --- |
+| MySQL | 已内置 | 支持 `mysqldump` 备份与恢复 |
+| Redis | 已内置 | 支持 standalone / cluster 的 RDB 导出 |
+| MinIO | 已内置 | 支持 bucket/prefix mirror 备份与恢复 |
+| Milvus | 已内置 | 支持 `milvus-backup` CLI，当前标记 beta |
+| RabbitMQ | 未内置 | core 可以承载，但本仓库当前 tag 不附带官方 RabbitMQ addon 包 |
 
-表示一个具体的数据源实例，绑定到某个 `BackupAddon`。
+这意味着：
 
-它可以携带：
+- MySQL / Redis / MinIO / Milvus 可以直接参考本仓库样例与 addon 包使用
+- RabbitMQ 如果已经在你们自己的中间件安装器里注册了 `BackupAddon / BackupSource`，可以直接复用 core/operator 的策略、后端和恢复流程
+- 如果还没有 RabbitMQ addon，需要先补 addon，再接入这套控制面
 
-- `targetRef`：指向被保护对象
-- `endpoint`：连接信息
-- `parameters`：普通参数
-- `secretRefs`：敏感参数
-- `paused`：暂停该数据源的调和
+## 推荐落地顺序
 
-### `BackupStorage`
+1. 安装 `dataprotection` operator
+2. 准备 `backup-system` 命名空间与运行时密钥
+3. 准备 MinIO / NFS 备份后端
+4. 安装中间件，并注册各自的 `BackupAddon / BackupSource`
+5. 按需创建 `BackupPolicy`、`RetentionPolicy`、`NotificationEndpoint`
+6. 用 `BackupJob` 做首轮 smoke backup
+7. 用 `RestoreJob` 做恢复演练与导入恢复验证
 
-定义备份资产最终落到哪里。
+## 文档导航
 
-当前支持：
+- 快速上手：[`docs/QUICKSTART.zh-CN.md`](docs/QUICKSTART.zh-CN.md)
+- 详细操作手册：[`docs/OPERATIONS-RUNBOOK.zh-CN.md`](docs/OPERATIONS-RUNBOOK.zh-CN.md)
+- 场景说明：[`docs/USER-CASES.zh-CN.md`](docs/USER-CASES.zh-CN.md)
+- 手工测试计划：[`docs/MANUAL-TEST-PLAN.zh-CN.md`](docs/MANUAL-TEST-PLAN.zh-CN.md)
+- 样例入口：[`config/samples`](config/samples)
+- quickstart 样例：[`config/samples/quickstart`](config/samples/quickstart)
 
-- `spec.type: nfs`
+## 最常用的资源对象
+
+### 1. `BackupSource`
+
+表示一个具体的受保护数据源实例，例如：
+
+- `mysql-prod`
+- `redis-cluster`
+- `minio-source`
+- `milvus-prod`
+
+它描述：
+
+- 备份使用哪个 addon
+- 连接哪个实例
+- 使用哪些参数和密钥
+
+### 2. `BackupStorage`
+
+表示备份资产最终写到哪里，当前支持：
+
 - `spec.type: minio`
+- `spec.type: nfs`
 
-控制器会在执行前做存储 preflight，并把结果写入：
+### 3. `BackupPolicy`
 
-- `status.lastProbeResult`
-- `status.lastProbeMessage`
-- `status.lastProbeTime`
+表示定时备份策略。重点是：
 
-### `RetentionPolicy`
+- `spec.storageRefs` 支持多个后端
+- operator 会为每个后端生成独立 `CronJob`
+- `status.cronJobNames` 会记录实际下发的 `CronJob`
 
-定义保留策略：
+### 4. `RestoreJob`
 
-- `spec.successfulSnapshots.keepLast`
-- `spec.failedExecutions.keepLast`
+恢复任务当前有两种来源：
 
-保留策略现在不只是“删 CR”，也会同步删除后端 NFS / MinIO 上超出的历史备份归档、校验文件和元数据文件。
+- `snapshotRef`：从平台内登记的 `Snapshot` 恢复
+- `importSource`：从 NFS / MinIO 上已有的离线导出包、目录或单文件恢复
 
-### `BackupPolicy`
-
-表示周期性备份策略。
-
-关键点：
-
-- `spec.storageRefs` 支持多个存储目标
-- 控制器会按存储目标生成多个原生 `CronJob`
-- `status.cronJobNames` 会记录实际生成的 `CronJob`
-- `spec.suspend` 可暂停调度
-
-这意味着“同一个数据源同时写入多个备份中心”已经是原生能力，而不是额外脚本拼接。
-
-### `BackupJob`
-
-表示一次手动触发的单次备份。
-
-典型场景：
-
-- 升级前手工打一份备份
-- 演练时只向某一个存储目标打一份备份
-- 验证 addon 是否工作正常
-
-### `RestoreJob`
-
-表示一次恢复任务，当前有两种来源：
-
-#### 1. 平台内快照恢复
-
-使用 `spec.snapshotRef`，适合恢复平台内成功生成的标准快照。
-
-#### 2. 导入恢复
-
-使用 `spec.importSource`，适合下面这些场景：
-
-- A 集群导出，B 集群导入
-- 本地离线包上传到 MinIO 后恢复
-- NFS 上已经有目录或单文件，希望直接恢复
-
-`importSource` 关键字段：
-
-- `storageRef`：从哪个 `BackupStorage` 读取
-- `path`：相对存储根路径
-- `format`：`auto | archive | filesystem`
-- `series`：导入后写入的 series 名称
-- `snapshot`：导入后使用的快照名
-
-### `Snapshot`
-
-平台内对一次成功备份资产的登记记录。
-
-关键字段：
-
-- `spec.series`
-- `spec.storageRef`
-- `spec.backendPath`
-- `spec.snapshot`
-- `spec.checksum`
-- `spec.size`
-- `status.artifactReady`
-- `status.latest`
-
-## 推荐交付方式
-
-更接近真实生产的流程应该是：
-
-1. 先安装 `dataprotection` operator
-2. 在 `backup-system` 中准备一套只用于备份的 MinIO
-3. 如有需要，再补一套只用于备份的 NFS
-4. 再安装具体中间件
-5. 在中间件安装阶段自动注册自己的 `BackupAddon / BackupSource / BackupPolicy`
-
-这也是现在更推荐的方向：不要让现场再额外理解一套“独立 addon 安装包”，而是在中间件安装时顺带把备份接入注册进去。
-
-## 新增能力梳理
-
-### 1. 多存储定时备份
-
-`BackupPolicy.spec.storageRefs` 现在是数组。一个策略可以同时写入多个 `BackupStorage`。
-
-例如：
-
-- `minio-primary`
-- `nfs-primary`
-
-控制器会为每个存储目标分别生成一个 `CronJob`，这样调度、失败、重试和观测都更清晰。
-
-### 2. 导入恢复
-
-`RestoreJob` 不再只能依赖平台内 `Snapshot`。现在可以直接从外部导入路径恢复：
-
-- `.tgz`
-- `.tar.gz`
-- `.tar`
-- 目录
-- 单文件
-
-`format=auto` 时：
-
-- `.tgz/.tar.gz/.tar` 按归档包处理
-- 其它路径按文件系统内容处理
-
-### 3. 保留策略同步清理后端文件
-
-当保留策略超出 `keepLast` 时，控制器会同时处理：
-
-- `Snapshot` 记录
-- NFS 后端的 `.tgz / .sha256 / .metadata.json`
-- MinIO 后端的 `.tgz / .sha256 / .metadata.json`
-
-这就是你前面遇到“后端还有过期文件残留”的核心改进点。
-
-### 4. 恢复时覆盖连接目标
-
-`RestoreJob` 可以覆盖来自 `BackupSource` 的默认目标信息：
-
-- `targetRef`
-- `endpoint`
-- `parameters`
-- `secretRefs`
-
-也就是说，同一份备份可以恢复到不同环境或不同实例，而不必强制复制一套新的 `BackupSource`。
-
-### 5. 通知统一收敛
-
-`BackupPolicy`、`BackupJob`、`RestoreJob` 都支持 `notificationRefs`。
-
-通知结果会写回状态中，便于排障：
-
-- `status.notification.phase`
-- `status.notification.attempts`
-- `status.notification.message`
-
-## 归档格式说明
-
-当前平台内部标准备份归档格式是：
-
-- `${snapshot}.tgz`
-- `${snapshot}.tgz.sha256`
-- `${snapshot}.metadata.json`
-
-平台会把 addon 导出的 `/workspace/output` 打成归档，再上传到 NFS / MinIO。
-
-## 当前作用边界
-
-`dataprotection core` 负责：
-
-- 调度 `CronJob -> Job`
-- 存储 preflight
-- 归档打包
-- 上传 / 下载 NFS 或 MinIO
-- 创建与维护 `Snapshot`
-- 执行保留策略
-- 触发通知
-
-`BackupAddon` 负责：
-
-- 面向具体业务的数据导出
-- 面向具体业务的数据导入
-
-## Quickstart
-
-推荐直接看：
-
-- [docs/QUICKSTART.zh-CN.md](docs/QUICKSTART.zh-CN.md)
-- [docs/USER-CASES.zh-CN.md](docs/USER-CASES.zh-CN.md)
-- [config/samples/quickstart/11-backuppolicy-fanout-minio-nfs.yaml](config/samples/quickstart/11-backuppolicy-fanout-minio-nfs.yaml)
-
-## 当前样例目录
-
-- [config/samples](config/samples)
-- [config/samples/quickstart](config/samples/quickstart)
-- [addons](addons)
-
-## 构建
+## 构建与校验
 
 ```bash
 make generate
@@ -247,8 +114,36 @@ make test
 APP_VERSION="$(cat VERSION)" bash scripts/assemble-install.sh install.sh
 ```
 
-## 当前更适合怎么理解这个项目
+## operator 安装
 
-一句话版本：
+```bash
+./data-protection-operator-amd64.run install -y
+```
 
-`dataprotection` 不是“某个中间件的备份脚本合集”，而是一套通用的数据保护控制面；中间件 addon 只是这个控制面上的业务插件。
+安装完成后重点检查：
+
+```bash
+kubectl get crd | grep dataprotection
+kubectl get deploy -n data-protection-system
+```
+
+## 典型样例
+
+- 单 MinIO 周期备份：[`config/samples/quickstart/07-backuppolicy-minio-every-3m.yaml`](config/samples/quickstart/07-backuppolicy-minio-every-3m.yaml)
+- 手动 NFS 备份：[`config/samples/quickstart/08-backupjob-manual-nfs.yaml`](config/samples/quickstart/08-backupjob-manual-nfs.yaml)
+- Snapshot 恢复：[`config/samples/quickstart/09-restorejob-from-snapshot.yaml`](config/samples/quickstart/09-restorejob-from-snapshot.yaml)
+- 导入包恢复：[`config/samples/quickstart/10-restorejob-from-import.yaml`](config/samples/quickstart/10-restorejob-from-import.yaml)
+- MinIO + NFS 双落点：[`config/samples/quickstart/11-backuppolicy-fanout-minio-nfs.yaml`](config/samples/quickstart/11-backuppolicy-fanout-minio-nfs.yaml)
+
+## 与中间件项目的关系
+
+更推荐的项目交付方式是：
+
+- `apps_mysql`、`apps_redis`、`apps_milvus-cluster`、`apps_minio-cluster` 在安装时自动把备份对象注册到平台
+- 运维侧只维护：
+  - 存储后端
+  - 保留策略
+  - 通知
+  - 恢复演练
+
+这样就不会让现场同学再理解两套割裂的交付入口。

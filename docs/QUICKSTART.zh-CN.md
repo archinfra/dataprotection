@@ -1,5 +1,10 @@
 # Quickstart
 
+如果你现在不是做最小样例，而是准备真正落地到 MySQL / Redis / Milvus / MinIO 等中间件，请优先配合阅读：
+
+- `docs/OPERATIONS-RUNBOOK.zh-CN.md`
+- `docs/USER-CASES.zh-CN.md`
+
 这份 quickstart 按“更接近真实交付”的顺序来写，不再把重点放在“单独演示一个 MySQL addon 包”。
 
 ## 推荐流程
