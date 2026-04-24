@@ -5,18 +5,16 @@ docker_login_if_requested() {
 }
 
 prepare_images() {
-  extract_payload
+  load_image_metadata
   [[ "${SKIP_IMAGE_PREPARE}" == "true" ]] && return 0
 
   docker_login_if_requested
 
   section "Preparing images"
-  while IFS= read -r item; do
-    [[ -n "${item}" ]] || continue
+  while IFS=$'\t' read -r _name tar_name load_ref default_target_ref _platform _pull _dockerfile; do
+    [[ -n "${tar_name}" ]] || continue
 
-    local default_target_ref tar_name tar_path source_ref target_ref
-    default_target_ref="$(jq -r '.tag' <<<"${item}")"
-    tar_name="$(jq -r '.tar' <<<"${item}")"
+    local tar_path target_ref
     tar_path="${IMAGE_DIR}/${tar_name}"
     target_ref="$(retarget_image_ref "${default_target_ref}")"
 
@@ -25,14 +23,13 @@ prepare_images() {
     else
       [[ -f "${tar_path}" ]] || die "Image tar not found: ${tar_path}"
       log "Loading ${tar_name}"
-      source_ref="$(docker load -i "${tar_path}" | awk -F': ' '/Loaded image/ {print $2}' | tail -n 1)"
-      [[ -n "${source_ref}" ]] || die "Unable to detect loaded image name from ${tar_name}"
-      if [[ "${source_ref}" != "${target_ref}" ]]; then
-        docker tag "${source_ref}" "${target_ref}"
+      docker load -i "${tar_path}" >/dev/null
+      if [[ "${load_ref}" != "${target_ref}" ]]; then
+        docker tag "${load_ref}" "${target_ref}"
       fi
     fi
 
     log "Pushing ${target_ref}"
     docker push "${target_ref}" >/dev/null
-  done < <(jq -c '.[]' "${IMAGE_JSON}")
+  done < "${IMAGE_INDEX}"
 }

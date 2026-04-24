@@ -77,12 +77,20 @@ parse_args() {
 }
 
 check_requirements() {
-  command -v jq >/dev/null 2>&1 || die "jq is required"
   command -v docker >/dev/null 2>&1 || die "docker is required"
+  command -v python >/dev/null 2>&1 || command -v python3 >/dev/null 2>&1 || die "python or python3 is required"
   command -v tar >/dev/null 2>&1 || die "tar is required"
   [[ -f "${ASSEMBLER}" ]] || die "scripts/assemble-install.sh is missing"
   [[ -f "${IMAGE_JSON}" ]] || die "images/image.json is missing"
   [[ -f "${MANIFESTS_DIR}/operator-install.yaml.tmpl" ]] || die "manifests/operator-install.yaml.tmpl is missing"
+}
+
+python_cmd() {
+  if command -v python >/dev/null 2>&1; then
+    printf 'python'
+  else
+    printf 'python3'
+  fi
 }
 
 docker_buildx_available() {
@@ -104,26 +112,65 @@ prepare_manifests() {
   cp "${ROOT_DIR}"/config/crd/bases/*.yaml "${TEMP_DIR}/manifests/crds/"
 }
 
+write_image_metadata() {
+  local arch="$1"
+  local output_json="$2"
+  local output_index="$3"
+  "$(python_cmd)" - "${IMAGE_JSON}" "${arch}" "${VERSION}" "${output_json}" "${output_index}" <<'PY'
+import json
+import sys
+
+source_path, arch, version, output_json, output_index = sys.argv[1:]
+
+with open(source_path, "r", encoding="utf-8") as fh:
+    items = json.load(fh)
+
+selected = []
+for original in items:
+    if original.get("arch") != arch:
+        continue
+    item = dict(original)
+    if item.get("name") == "dataprotection-operator":
+        item["tag"] = f"sealos.hub:5000/kube4/dataprotection-operator:{version}-{arch}"
+    selected.append(item)
+
+if not selected:
+    raise SystemExit(f"no image definition found for arch={arch}")
+
+with open(output_json, "w", encoding="utf-8") as fh:
+    json.dump(selected, fh, ensure_ascii=False, indent=2)
+    fh.write("\n")
+
+with open(output_index, "w", encoding="utf-8", newline="") as fh:
+    for item in selected:
+        default_target_ref = item.get("tag") or item.get("pull") or ""
+        fh.write("\t".join([
+            item.get("name", ""),
+            item.get("tar", ""),
+            default_target_ref,
+            default_target_ref,
+            item.get("platform", ""),
+            item.get("pull", ""),
+            item.get("dockerfile", ""),
+        ]) + "\n")
+PY
+}
+
 prepare_images() {
   local count=0
-  while IFS= read -r item; do
-    [[ -n "${item}" ]] || continue
-    local name tag tar_name pull dockerfile platform build_ref
-    name="$(jq -r '.name' <<<"${item}")"
-    tag="$(jq -r '.tag' <<<"${item}")"
-    tar_name="$(jq -r '.tar' <<<"${item}")"
-    pull="$(jq -r '.pull // empty' <<<"${item}")"
-    dockerfile="$(jq -r '.dockerfile // empty' <<<"${item}")"
-    platform="$(jq -r '.platform // empty' <<<"${item}")"
+  local payload_image_json="${TEMP_DIR}/images/image.json"
+  local payload_image_index="${TEMP_DIR}/images/image-index.tsv"
+
+  write_image_metadata "${ARCH}" "${payload_image_json}" "${payload_image_index}"
+
+  while IFS=$'\t' read -r name tar_name load_ref default_target_ref platform pull dockerfile; do
+    [[ -n "${name}" ]] || continue
+    local build_ref
     [[ -n "${platform}" ]] || platform="${PLATFORM}"
-    if [[ "${name}" == "dataprotection-operator" ]]; then
-      tag="sealos.hub:5000/kube4/dataprotection-operator:${VERSION}-${ARCH}"
-      item="$(jq -c --arg tag "${tag}" '.tag = $tag' <<<"${item}")"
-    fi
-    build_ref="${tag}"
+    build_ref="${default_target_ref}"
 
     if [[ -n "${dockerfile}" ]]; then
-      log "Building ${name}:${tag} for ${platform}"
+      log "Building ${build_ref} for ${platform}"
       if docker_buildx_available; then
         docker buildx build --load --platform "${platform}" \
           --build-arg TARGETOS=linux \
@@ -146,18 +193,15 @@ prepare_images() {
       else
         die "docker buildx is required to pull ${pull} for ${platform}"
       fi
-      docker tag "${pull}" "${build_ref}"
+      [[ "${pull}" == "${build_ref}" ]] || docker tag "${pull}" "${build_ref}"
     fi
 
     log "Saving ${build_ref} to ${tar_name}"
     docker save -o "${TEMP_DIR}/images/${tar_name}" "${build_ref}"
-    jq -c . <<<"${item}" >> "${TEMP_DIR}/images/image.jsonl"
     count=$((count + 1))
-  done < <(jq -c --arg arch "${ARCH}" '.[] | select(.arch == $arch)' "${IMAGE_JSON}")
+  done < "${payload_image_index}"
 
   (( count > 0 )) || die "No image definition found for arch=${ARCH}"
-  jq -s '.' "${TEMP_DIR}/images/image.jsonl" > "${TEMP_DIR}/images/image.json"
-  rm -f "${TEMP_DIR}/images/image.jsonl"
 }
 
 package_payload() {

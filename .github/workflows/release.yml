@@ -122,9 +122,6 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-
       - name: Bootstrap
         run: bash hack/bootstrap-dev-env.sh
 
@@ -257,9 +254,6 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: Setup QEMU
         uses: docker/setup-qemu-action@v3

@@ -79,13 +79,21 @@ parse_args() {
 }
 
 check_requirements() {
-  command -v jq >/dev/null 2>&1 || die "jq is required"
   command -v docker >/dev/null 2>&1 || die "docker is required"
+  command -v python >/dev/null 2>&1 || command -v python3 >/dev/null 2>&1 || die "python or python3 is required"
   [[ -f "${ROOT_DIR}/install.sh" ]] || die "install.sh is missing"
   [[ -d "${MANIFESTS_DIR}" ]] || die "manifests directory is missing"
   [[ -d "${IMAGES_DIR}" ]] || die "images directory is missing"
   [[ -f "${IMAGE_JSON}" ]] || die "images/image.json is missing"
   grep -q '^__PAYLOAD_BELOW__$' "${ROOT_DIR}/install.sh" || die "install.sh is missing __PAYLOAD_BELOW__ marker"
+}
+
+python_cmd() {
+  if command -v python >/dev/null 2>&1; then
+    printf 'python'
+  else
+    printf 'python3'
+  fi
 }
 
 docker_buildx_available() {
@@ -97,19 +105,54 @@ prepare_directories() {
   mkdir -p "${TEMP_DIR}/images" "${TEMP_DIR}/manifests" "${DIST_DIR}"
 }
 
+write_image_metadata() {
+  local arch="$1"
+  local output_json="$2"
+  local output_index="$3"
+  "$(python_cmd)" - "${IMAGE_JSON}" "${arch}" "${output_json}" "${output_index}" <<'PY'
+import json
+import sys
+
+source_path, arch, output_json, output_index = sys.argv[1:]
+
+with open(source_path, "r", encoding="utf-8") as fh:
+    items = json.load(fh)
+
+selected = [dict(item) for item in items if item.get("arch") == arch]
+if not selected:
+    raise SystemExit(f"no image definitions found for arch={arch}")
+
+with open(output_json, "w", encoding="utf-8") as fh:
+    json.dump(selected, fh, ensure_ascii=False, indent=2)
+    fh.write("\n")
+
+with open(output_index, "w", encoding="utf-8", newline="") as fh:
+    for item in selected:
+        default_target_ref = item.get("tag") or item.get("pull") or ""
+        fh.write("\t".join([
+            item.get("name", ""),
+            item.get("tar", ""),
+            default_target_ref,
+            default_target_ref,
+            item.get("platform", ""),
+            item.get("pull", ""),
+            item.get("dockerfile", ""),
+        ]) + "\n")
+PY
+}
+
 prepare_images() {
   local count=0
-  : > "${TEMP_DIR}/images/image.jsonl"
-  while IFS= read -r item; do
-    [[ -n "${item}" ]] || continue
-    local pull tag tar_name platform dockerfile build_ref
-    pull="$(jq -r '.pull // empty' <<<"${item}")"
-    tag="$(jq -r '.tag // .pull' <<<"${item}")"
-    tar_name="$(jq -r '.tar' <<<"${item}")"
-    platform="$(jq -r '.platform // empty' <<<"${item}")"
-    dockerfile="$(jq -r '.dockerfile // empty' <<<"${item}")"
+  local payload_image_json="${TEMP_DIR}/images/image.json"
+  local payload_image_index="${TEMP_DIR}/images/image-index.tsv"
+
+  write_image_metadata "${ARCH}" "${payload_image_json}" "${payload_image_index}"
+
+  while IFS=$'\t' read -r _name tar_name load_ref default_target_ref platform pull dockerfile; do
+    [[ -n "${tar_name}" ]] || continue
+    local build_ref
     [[ -n "${platform}" ]] || platform="${PLATFORM}"
-    build_ref="${tag}"
+    build_ref="${default_target_ref}"
 
     if [[ -n "${dockerfile}" ]]; then
       log "Building ${build_ref} from ${dockerfile} for ${platform}"
@@ -134,13 +177,10 @@ prepare_images() {
 
     log "Saving ${build_ref} to ${tar_name}"
     docker save -o "${TEMP_DIR}/images/${tar_name}" "${build_ref}"
-    jq -c . <<<"${item}" >> "${TEMP_DIR}/images/image.jsonl"
     count=$((count + 1))
-  done < <(jq -c --arg arch "${ARCH}" '.[] | select(.arch == $arch)' "${IMAGE_JSON}")
+  done < "${payload_image_index}"
 
   (( count > 0 )) || die "No image definitions found for arch=${ARCH}"
-  jq -s '.' "${TEMP_DIR}/images/image.jsonl" > "${TEMP_DIR}/images/image.json"
-  rm -f "${TEMP_DIR}/images/image.jsonl"
 }
 
 package_payload() {

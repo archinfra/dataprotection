@@ -65,7 +65,6 @@ make build
 如需手工验证离线安装包链路：
 
 ```bash
-sudo apt-get update && sudo apt-get install -y jq
 bash build.sh --arch amd64
 ```
 
@@ -100,4 +99,3 @@ bash build.sh --arch amd64
 
 - 正式的多架构镜像和 .run 产包，优先通过 GitHub Actions 构建
 - 开发机更适合做 generate/manifests/test/build 这类工程验证，不强依赖完整镜像拉取环境
-

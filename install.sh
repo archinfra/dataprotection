@@ -13,6 +13,7 @@ IMAGE_DIR="${WORKDIR}/images"
 MANIFEST_DIR="${WORKDIR}/manifests"
 CRD_DIR="${MANIFEST_DIR}/crds"
 IMAGE_JSON="${IMAGE_DIR}/image.json"
+IMAGE_INDEX="${IMAGE_DIR}/image-index.tsv"
 INSTALL_TEMPLATE="${MANIFEST_DIR}/operator-install.yaml.tmpl"
 PAYLOAD_MARKER="__PAYLOAD_BELOW__"
 
@@ -31,6 +32,8 @@ SKIP_IMAGE_PREPARE="false"
 OPERATOR_IMAGE_OVERRIDE=""
 MINIO_HELPER_IMAGE_OVERRIDE=""
 UTILITY_IMAGE_OVERRIDE=""
+
+declare -A IMAGE_DEFAULT_REFS=()
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -210,7 +213,7 @@ confirm_plan() {
 }
 
 extract_payload() {
-  if [[ -f "${IMAGE_JSON}" && -d "${CRD_DIR}" && -f "${INSTALL_TEMPLATE}" ]]; then
+  if [[ -f "${IMAGE_JSON}" && -f "${IMAGE_INDEX}" && -d "${CRD_DIR}" && -f "${INSTALL_TEMPLATE}" ]]; then
     return 0
   fi
 
@@ -250,10 +253,6 @@ validate_environment() {
   case "${ACTION}" in
     install)
       require_command docker
-      require_command jq
-      ;;
-    uninstall)
-      require_command jq
       ;;
   esac
 }
@@ -264,10 +263,20 @@ trim_slash() {
   printf '%s' "${value}"
 }
 
-image_json_field() {
-  local name="$1"
-  local field="$2"
-  jq -r --arg name "${name}" --arg field "${field}" 'map(select(.name == $name)) | first | .[$field] // empty' "${IMAGE_JSON}"
+load_image_metadata() {
+  if (( ${#IMAGE_DEFAULT_REFS[@]} > 0 )); then
+    return 0
+  fi
+
+  [[ -f "${IMAGE_INDEX}" ]] || extract_payload
+  [[ -f "${IMAGE_INDEX}" ]] || die "Payload is missing images/image-index.tsv"
+
+  while IFS=$'\t' read -r name _tar_name _load_ref default_target_ref _platform _pull _dockerfile; do
+    [[ -n "${name}" ]] || continue
+    IMAGE_DEFAULT_REFS["${name}"]="${default_target_ref}"
+  done < "${IMAGE_INDEX}"
+
+  (( ${#IMAGE_DEFAULT_REFS[@]} > 0 )) || die "No image metadata found in ${IMAGE_INDEX}"
 }
 
 retarget_image_ref() {
@@ -285,8 +294,9 @@ retarget_image_ref() {
 default_image_ref() {
   local name="$1"
   local default_ref
-  default_ref="$(image_json_field "${name}" tag)"
-  [[ -n "${default_ref}" ]] || die "Unable to resolve image tag for ${name} from image.json"
+  load_image_metadata
+  default_ref="${IMAGE_DEFAULT_REFS[${name}]:-}"
+  [[ -n "${default_ref}" ]] || die "Unable to resolve image tag for ${name} from image-index.tsv"
   retarget_image_ref "${default_ref}"
 }
 
@@ -321,18 +331,16 @@ docker_login_if_requested() {
 }
 
 prepare_images() {
-  extract_payload
+  load_image_metadata
   [[ "${SKIP_IMAGE_PREPARE}" == "true" ]] && return 0
 
   docker_login_if_requested
 
   section "Preparing images"
-  while IFS= read -r item; do
-    [[ -n "${item}" ]] || continue
+  while IFS=$'\t' read -r _name tar_name load_ref default_target_ref _platform _pull _dockerfile; do
+    [[ -n "${tar_name}" ]] || continue
 
-    local default_target_ref tar_name tar_path source_ref target_ref
-    default_target_ref="$(jq -r '.tag' <<<"${item}")"
-    tar_name="$(jq -r '.tar' <<<"${item}")"
+    local tar_path target_ref
     tar_path="${IMAGE_DIR}/${tar_name}"
     target_ref="$(retarget_image_ref "${default_target_ref}")"
 
@@ -341,16 +349,15 @@ prepare_images() {
     else
       [[ -f "${tar_path}" ]] || die "Image tar not found: ${tar_path}"
       log "Loading ${tar_name}"
-      source_ref="$(docker load -i "${tar_path}" | awk -F': ' '/Loaded image/ {print $2}' | tail -n 1)"
-      [[ -n "${source_ref}" ]] || die "Unable to detect loaded image name from ${tar_name}"
-      if [[ "${source_ref}" != "${target_ref}" ]]; then
-        docker tag "${source_ref}" "${target_ref}"
+      docker load -i "${tar_path}" >/dev/null
+      if [[ "${load_ref}" != "${target_ref}" ]]; then
+        docker tag "${load_ref}" "${target_ref}"
       fi
     fi
 
     log "Pushing ${target_ref}"
     docker push "${target_ref}" >/dev/null
-  done < <(jq -c '.[]' "${IMAGE_JSON}")
+  done < "${IMAGE_INDEX}"
 }
 
 render_install_manifest() {

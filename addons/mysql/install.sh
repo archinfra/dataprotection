@@ -3,13 +3,14 @@
 set -Eeuo pipefail
 
 APP_NAME="dataprotection-addon-mysql"
-INSTALLER_VERSION="2.0.4"
+INSTALLER_VERSION="2.0.5"
 DISPLAY_NAME="DataProtection MySQL Addon"
 ADDON_NAME="mysql-dump"
 WORKDIR="/tmp/${APP_NAME}-installer"
 MANIFEST_DIR="${WORKDIR}/manifests"
 IMAGE_DIR="${WORKDIR}/images"
 IMAGE_JSON="${IMAGE_DIR}/image.json"
+IMAGE_INDEX="${IMAGE_DIR}/image-index.tsv"
 ADDON_TEMPLATE_FILE="${MANIFEST_DIR}/backupaddon.yaml.tmpl"
 SAMPLES_DIR="${MANIFEST_DIR}/samples"
 RENDERED_MANIFEST="${WORKDIR}/rendered-backupaddon.yaml"
@@ -23,6 +24,8 @@ REGISTRY_ADDR="sealos.hub:5000"
 REGISTRY_USER="admin"
 REGISTRY_PASS="passw0rd"
 OUTPUT_DIR="${DEFAULT_OUTPUT_DIR}"
+RUNNER_IMAGE_LOAD_REF=""
+RUNNER_IMAGE_DEFAULT_REF=""
 
 log() {
   printf '[INFO] %s\n' "$*"
@@ -138,7 +141,6 @@ check_requirements() {
   case "${ACTION}" in
     install)
       command -v kubectl >/dev/null 2>&1 || die "kubectl is required"
-      command -v jq >/dev/null 2>&1 || die "jq is required"
       command -v tar >/dev/null 2>&1 || die "tar is required"
       command -v awk >/dev/null 2>&1 || die "awk is required"
       command -v head >/dev/null 2>&1 || die "head is required"
@@ -208,6 +210,24 @@ extract_payload() {
 
   tail -c +"$((offset + skip))" "$0" | tar -xzf - -C "${WORKDIR}" || die "Failed to extract payload"
   [[ -f "${ADDON_TEMPLATE_FILE}" ]] || die "Payload is missing manifests/backupaddon.yaml.tmpl"
+  [[ -f "${IMAGE_INDEX}" ]] || die "Payload is missing images/image-index.tsv"
+}
+
+load_image_metadata() {
+  if [[ -n "${RUNNER_IMAGE_DEFAULT_REF}" ]]; then
+    return 0
+  fi
+
+  [[ -f "${IMAGE_INDEX}" ]] || extract_payload
+
+  while IFS=$'\t' read -r _name _tar_name load_ref default_target_ref _platform _pull _dockerfile; do
+    [[ -n "${default_target_ref}" ]] || continue
+    RUNNER_IMAGE_LOAD_REF="${load_ref}"
+    RUNNER_IMAGE_DEFAULT_REF="${default_target_ref}"
+    return 0
+  done < "${IMAGE_INDEX}"
+
+  die "No addon image metadata found in ${IMAGE_INDEX}"
 }
 
 docker_login() {
@@ -229,33 +249,32 @@ resolve_target_image_tag() {
 }
 
 prepare_images() {
+  load_image_metadata
   [[ "${SKIP_IMAGE_PREPARE}" == "true" ]] && return 0
-  [[ -f "${IMAGE_JSON}" ]] || die "Payload is missing images/image.json"
 
   docker_login
 
   local count=0
-  while IFS= read -r item; do
-    [[ -n "${item}" ]] || continue
-    local tar_name image_tag target_tag tar_path
-    tar_name="$(jq -r '.tar' <<<"${item}")"
-    image_tag="$(jq -r '.tag // .pull' <<<"${item}")"
-    target_tag="$(resolve_target_image_tag "${image_tag}")"
+  while IFS=$'\t' read -r _name tar_name load_ref default_target_ref _platform _pull _dockerfile; do
+    [[ -n "${tar_name}" ]] || continue
+    local target_tag tar_path
+    target_tag="$(resolve_target_image_tag "${default_target_ref}")"
     tar_path="${IMAGE_DIR}/${tar_name}"
     [[ -f "${tar_path}" ]] || die "Image tar not found: ${tar_path}"
 
     docker load -i "${tar_path}" >/dev/null
-    [[ "${target_tag}" == "${image_tag}" ]] || docker tag "${image_tag}" "${target_tag}"
+    [[ "${target_tag}" == "${load_ref}" ]] || docker tag "${load_ref}" "${target_tag}"
     docker push "${target_tag}" >/dev/null
     count=$((count + 1))
-  done < <(jq -c '.[]' "${IMAGE_JSON}")
+  done < "${IMAGE_INDEX}"
   (( count > 0 )) || die "No images were prepared"
 }
 
 render_manifest() {
   local template rendered runner_image
+  load_image_metadata
   template="$(< "${ADDON_TEMPLATE_FILE}")"
-  runner_image="$(resolve_target_image_tag "$(jq -r '.[0].tag // .[0].pull' "${IMAGE_JSON}")")"
+  runner_image="$(resolve_target_image_tag "${RUNNER_IMAGE_DEFAULT_REF}")"
   rendered="${template//__RUNNER_IMAGE__/${runner_image}}"
   rendered="${rendered//__ADDON_VERSION__/${INSTALLER_VERSION}}"
   printf '%s' "${rendered}" > "${RENDERED_MANIFEST}"

@@ -22,7 +22,7 @@ confirm_plan() {
 }
 
 extract_payload() {
-  if [[ -f "${IMAGE_JSON}" && -d "${CRD_DIR}" && -f "${INSTALL_TEMPLATE}" ]]; then
+  if [[ -f "${IMAGE_JSON}" && -f "${IMAGE_INDEX}" && -d "${CRD_DIR}" && -f "${INSTALL_TEMPLATE}" ]]; then
     return 0
   fi
 
@@ -62,10 +62,6 @@ validate_environment() {
   case "${ACTION}" in
     install)
       require_command docker
-      require_command jq
-      ;;
-    uninstall)
-      require_command jq
       ;;
   esac
 }
@@ -76,10 +72,20 @@ trim_slash() {
   printf '%s' "${value}"
 }
 
-image_json_field() {
-  local name="$1"
-  local field="$2"
-  jq -r --arg name "${name}" --arg field "${field}" 'map(select(.name == $name)) | first | .[$field] // empty' "${IMAGE_JSON}"
+load_image_metadata() {
+  if (( ${#IMAGE_DEFAULT_REFS[@]} > 0 )); then
+    return 0
+  fi
+
+  [[ -f "${IMAGE_INDEX}" ]] || extract_payload
+  [[ -f "${IMAGE_INDEX}" ]] || die "Payload is missing images/image-index.tsv"
+
+  while IFS=$'\t' read -r name _tar_name _load_ref default_target_ref _platform _pull _dockerfile; do
+    [[ -n "${name}" ]] || continue
+    IMAGE_DEFAULT_REFS["${name}"]="${default_target_ref}"
+  done < "${IMAGE_INDEX}"
+
+  (( ${#IMAGE_DEFAULT_REFS[@]} > 0 )) || die "No image metadata found in ${IMAGE_INDEX}"
 }
 
 retarget_image_ref() {
@@ -97,8 +103,9 @@ retarget_image_ref() {
 default_image_ref() {
   local name="$1"
   local default_ref
-  default_ref="$(image_json_field "${name}" tag)"
-  [[ -n "${default_ref}" ]] || die "Unable to resolve image tag for ${name} from image.json"
+  load_image_metadata
+  default_ref="${IMAGE_DEFAULT_REFS[${name}]:-}"
+  [[ -n "${default_ref}" ]] || die "Unable to resolve image tag for ${name} from image-index.tsv"
   retarget_image_ref "${default_ref}"
 }
 
