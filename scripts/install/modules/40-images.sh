@@ -11,8 +11,10 @@ prepare_images() {
   docker_login_if_requested
 
   section "Preparing images"
-  while IFS=$'\t' read -r _name tar_name load_ref default_target_ref _platform _pull _dockerfile; do
+  while IFS='|' read -r _name tar_name load_ref default_target_ref _platform _pull _dockerfile; do
     [[ -n "${tar_name}" ]] || continue
+    [[ -n "${load_ref}" ]] || die "Image metadata for ${_name:-<unknown>} is missing load ref"
+    [[ -n "${default_target_ref}" ]] || die "Image metadata for ${_name:-<unknown>} is missing default target ref"
 
     local tar_path target_ref
     tar_path="${IMAGE_DIR}/${tar_name}"

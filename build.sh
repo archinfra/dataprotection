@@ -221,11 +221,42 @@ prepare_images() {
   (( count > 0 )) || die "No image definition found for arch=${ARCH}"
 }
 
+validate_payload_tree() {
+  local missing=0
+  local required_file
+
+  for required_file in \
+    "${TEMP_DIR}/images/image.json" \
+    "${TEMP_DIR}/images/image-index.tsv" \
+    "${TEMP_DIR}/manifests/operator-install.yaml.tmpl"
+  do
+    if [[ ! -f "${required_file}" ]]; then
+      printf '[ERROR] Payload file is missing before packaging: %s\n' "${required_file#${TEMP_DIR}/}" >&2
+      missing=1
+    fi
+  done
+
+  if ! compgen -G "${TEMP_DIR}/manifests/crds/*.yaml" >/dev/null; then
+    printf '[ERROR] Payload CRDs are missing before packaging: manifests/crds/*.yaml\n' >&2
+    missing=1
+  fi
+
+  (( missing == 0 )) || exit 1
+}
+
+validate_payload_archive() {
+  tar -tzf "${PAYLOAD_FILE}" | grep -qx './images/image-index.tsv' || die "Payload archive is missing images/image-index.tsv"
+  tar -tzf "${PAYLOAD_FILE}" | grep -qx './images/image.json' || die "Payload archive is missing images/image.json"
+  tar -tzf "${PAYLOAD_FILE}" | grep -qx './manifests/operator-install.yaml.tmpl' || die "Payload archive is missing manifests/operator-install.yaml.tmpl"
+}
+
 package_payload() {
+  validate_payload_tree
   (
     cd "${TEMP_DIR}"
     tar -czf "${PAYLOAD_FILE}" .
   )
+  validate_payload_archive
 }
 
 build_installer() {
@@ -255,6 +286,7 @@ build_installer() {
 
   first_bytes="$(dd if="${installer_path}" bs=1 skip="$((payload_offset + skip_bytes - 1))" count=2 2>/dev/null | od -An -tx1 | tr -d ' \n')"
   [[ "${first_bytes}" == "1f8b" ]] || die "Installer payload verification failed for ${installer_path}: expected gzip header, got ${first_bytes:-<empty>}"
+  tail -c +"$((payload_offset + skip_bytes))" "${installer_path}" | tar -tzf - | grep -qx './images/image-index.tsv' || die "Installer payload verification failed for ${installer_path}: images/image-index.tsv is missing"
   sha256sum "${installer_path}" > "${installer_path}.sha256"
   log "Built ${installer_path}"
 }

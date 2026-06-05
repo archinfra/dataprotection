@@ -242,10 +242,18 @@ extract_payload() {
 
   if tail -c +"$((payload_offset + skip_bytes))" "$0" | tar -tzf - >/dev/null 2>&1; then
     tail -c +"$((payload_offset + skip_bytes))" "$0" | tar -xzf - -C "${WORKDIR}"
+    validate_extracted_payload
     return 0
   fi
 
   die "Unable to extract embedded payload"
+}
+
+validate_extracted_payload() {
+  [[ -f "${IMAGE_JSON}" ]] || die "Payload is missing images/image.json"
+  [[ -f "${IMAGE_INDEX}" ]] || die "Payload is missing images/image-index.tsv"
+  [[ -f "${INSTALL_TEMPLATE}" ]] || die "Payload is missing manifests/operator-install.yaml.tmpl"
+  [[ -d "${CRD_DIR}" ]] || die "Payload is missing manifests/crds"
 }
 
 validate_environment() {
@@ -271,8 +279,9 @@ load_image_metadata() {
   [[ -f "${IMAGE_INDEX}" ]] || extract_payload
   [[ -f "${IMAGE_INDEX}" ]] || die "Payload is missing images/image-index.tsv"
 
-  while IFS=$'\t' read -r name _tar_name _load_ref default_target_ref _platform _pull _dockerfile; do
+  while IFS='|' read -r name _tar_name _load_ref default_target_ref _platform _pull _dockerfile; do
     [[ -n "${name}" ]] || continue
+    [[ -n "${default_target_ref}" ]] || die "Image metadata for ${name} is missing default target ref"
     IMAGE_DEFAULT_REFS["${name}"]="${default_target_ref}"
   done < "${IMAGE_INDEX}"
 
@@ -337,8 +346,10 @@ prepare_images() {
   docker_login_if_requested
 
   section "Preparing images"
-  while IFS=$'\t' read -r _name tar_name load_ref default_target_ref _platform _pull _dockerfile; do
+  while IFS='|' read -r _name tar_name load_ref default_target_ref _platform _pull _dockerfile; do
     [[ -n "${tar_name}" ]] || continue
+    [[ -n "${load_ref}" ]] || die "Image metadata for ${_name:-<unknown>} is missing load ref"
+    [[ -n "${default_target_ref}" ]] || die "Image metadata for ${_name:-<unknown>} is missing default target ref"
 
     local tar_path target_ref
     tar_path="${IMAGE_DIR}/${tar_name}"
