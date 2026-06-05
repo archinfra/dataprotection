@@ -1,0 +1,69 @@
+--- a/.github/workflows/release.yml
++++ b/.github/workflows/release.yml
+@@ -209,6 +209,14 @@
+           push: true
+           tags: ${{ needs.prepare.outputs.operator_tags }}
+ 
++      - name: Install skopeo
++        shell: bash
++        run: |
++          set -euo pipefail
++          sudo apt-get update
++          sudo apt-get install -y skopeo
++          skopeo --version
++
+       - name: Mirror runtime images
+         shell: bash
+         env:
+@@ -218,22 +226,41 @@
+           BUSYBOX_ALIYUN: ${{ needs.prepare.outputs.busybox_aliyun }}
+         run: |
+           set -euo pipefail
+-          create_aliases() {
++          authfile="${HOME}/.docker/config.json"
++          retry_copy() {
++            local source="$1"
++            local target="$2"
++            local attempt=1
++            local max_attempts=3
++            local delay=5
++            while true; do
++              echo "[INFO] Copying ${source} -> ${target}"
++              if skopeo copy --all --authfile "${authfile}" "docker://${source}" "docker://${target}"; then
++                return 0
++              fi
++              if (( attempt >= max_attempts )); then
++                echo "[ERROR] Failed to copy ${source} -> ${target}" >&2
++                return 1
++              fi
++              echo "[INFO] Copy failed; retrying in ${delay}s (${attempt}/${max_attempts})" >&2
++              sleep "${delay}"
++              attempt=$((attempt + 1))
++              delay=$((delay * 2))
++            done
++          }
++          copy_aliases() {
+             local source="$1"
+             shift
+-            local tags=()
+-            for value in "$@"; do
+-              if [[ -n "${value}" ]]; then
+-                tags+=("--tag" "${value}")
++            local target
++            for target in "$@"; do
++              if [[ -n "${target}" ]]; then
++                retry_copy "${source}" "${target}"
+               fi
+             done
+-            if (( ${#tags[@]} > 0 )); then
+-              docker buildx imagetools create "${tags[@]}" "${source}"
+-            fi
+           }
+ 
+-          create_aliases "minio/mc:latest" "${MC_DOCKERHUB}" "${MC_ALIYUN}"
+-          create_aliases "registry.cn-beijing.aliyuncs.com/kube4/busybox:v1" "${BUSYBOX_DOCKERHUB}" "${BUSYBOX_ALIYUN}"
++          copy_aliases "minio/mc:latest" "${MC_DOCKERHUB}" "${MC_ALIYUN}"
++          copy_aliases "registry.cn-beijing.aliyuncs.com/kube4/busybox:v1" "${BUSYBOX_DOCKERHUB}" "${BUSYBOX_ALIYUN}"
+ 
+   build-installers:
+     runs-on: ubuntu-latest
