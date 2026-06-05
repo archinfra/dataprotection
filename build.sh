@@ -181,7 +181,7 @@ PY
 prepare_images() {
   local count=0
   local payload_image_json="${TEMP_DIR}/images/image.json"
-  local payload_image_index="${TEMP_DIR}/images/image-index.psv"
+  local payload_image_index="${TEMP_DIR}/images/image-index.tsv"
 
   write_image_metadata "${ARCH}" "${payload_image_json}" "${payload_image_index}"
 
