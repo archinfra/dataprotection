@@ -1,0 +1,386 @@
+diff --git a/.github/workflows/addon-installers.yml b/.github/workflows/addon-installers.yml
+index 77fc50b..40210e3 100644
+--- a/.github/workflows/addon-installers.yml
++++ b/.github/workflows/addon-installers.yml
+@@ -21,6 +21,9 @@ permissions:
+ jobs:
+   build:
+     runs-on: ubuntu-24.04
++    env:
++      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
++      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+     strategy:
+       fail-fast: false
+       matrix:
+@@ -37,11 +40,28 @@ jobs:
+       - name: Checkout
+         uses: actions/checkout@v4
+ 
++      - name: Configure Docker Hub mirror
++        run: |
++          echo '{"registry-mirrors":["https://mirror.gcr.io"]}' | sudo tee /etc/docker/daemon.json
++          sudo systemctl restart docker
++
+       - name: Set up QEMU
+         uses: docker/setup-qemu-action@v3
+ 
+       - name: Set up Docker Buildx
+         uses: docker/setup-buildx-action@v3
++        with:
++          buildkitd-config-inline: |
++            [registry."docker.io"]
++              mirrors = ["mirror.gcr.io"]
++
++      - name: Login Docker Hub
++        if: ${{ env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
++        uses: docker/login-action@v3
++        with:
++          registry: docker.io
++          username: ${{ env.DOCKERHUB_USERNAME }}
++          password: ${{ env.DOCKERHUB_TOKEN }}
+ 
+       - name: Ensure executable permissions
+         run: |
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 12d5775..93f7c19 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -9,6 +9,9 @@ on:
+ jobs:
+   verify:
+     runs-on: ubuntu-latest
++    env:
++      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
++      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+     steps:
+       - name: Checkout
+         uses: actions/checkout@v4
+@@ -30,6 +33,14 @@ jobs:
+             [registry."docker.io"]
+               mirrors = ["mirror.gcr.io"]
+ 
++      - name: Login Docker Hub
++        if: ${{ env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
++        uses: docker/login-action@v3
++        with:
++          registry: docker.io
++          username: ${{ env.DOCKERHUB_USERNAME }}
++          password: ${{ env.DOCKERHUB_TOKEN }}
++
+       - name: Bootstrap
+         run: bash hack/bootstrap-dev-env.sh
+ 
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+index cf6974f..d8ffb2d 100644
+--- a/.github/workflows/release.yml
++++ b/.github/workflows/release.yml
+@@ -237,6 +237,9 @@ jobs:
+ 
+   build-installers:
+     runs-on: ubuntu-latest
++    env:
++      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
++      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+     needs:
+       - prepare
+       - verify
+@@ -270,6 +273,14 @@ jobs:
+             [registry."docker.io"]
+               mirrors = ["mirror.gcr.io"]
+ 
++      - name: Login Docker Hub
++        if: ${{ env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
++        uses: docker/login-action@v3
++        with:
++          registry: docker.io
++          username: ${{ env.DOCKERHUB_USERNAME }}
++          password: ${{ env.DOCKERHUB_TOKEN }}
++
+       - name: Build offline installer
+         run: bash build.sh --arch ${{ matrix.arch }}
+ 
+diff --git a/Dockerfile b/Dockerfile
+index 5640c01..a7dab45 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -1,6 +1,6 @@
+ # syntax=docker/dockerfile:1.7
+ 
+-ARG GO_BUILDER_IMAGE=public.ecr.aws/docker/library/golang:1.22.12
++ARG GO_BUILDER_IMAGE=golang:1.22.12
+ ARG RUNTIME_IMAGE=gcr.io/distroless/static:nonroot
+ ARG BUILDPLATFORM=linux/amd64
+ FROM --platform=${BUILDPLATFORM} ${GO_BUILDER_IMAGE} AS builder
+diff --git a/addons/milvus/Dockerfile.runner b/addons/milvus/Dockerfile.runner
+index e4d9af7..7814f28 100644
+--- a/addons/milvus/Dockerfile.runner
++++ b/addons/milvus/Dockerfile.runner
+@@ -1,7 +1,7 @@
+ ARG TARGETARCH=amd64
+ ARG MILVUS_BACKUP_VERSION=v0.5.12
+ 
+-FROM public.ecr.aws/docker/library/alpine:3.20
++FROM alpine:3.20
+ 
+ ARG TARGETARCH
+ ARG MILVUS_BACKUP_VERSION
+diff --git a/addons/milvus/build.sh b/addons/milvus/build.sh
+index 379c7ce..b422c96 100644
+--- a/addons/milvus/build.sh
++++ b/addons/milvus/build.sh
+@@ -92,6 +92,28 @@ docker_buildx_available() {
+   docker buildx version >/dev/null 2>&1
+ }
+ 
++
++docker_pull_image() {
++  local platform="$1"
++  local image="$2"
++  local max_attempts="${DOCKER_PULL_RETRIES:-3}"
++  local delay_seconds="${DOCKER_PULL_RETRY_DELAY_SECONDS:-5}"
++  local attempt=1
++
++  while (( attempt <= max_attempts )); do
++    if docker pull --platform "${platform}" "${image}"; then
++      return 0
++    fi
++    if (( attempt == max_attempts )); then
++      return 1
++    fi
++    log "Pull failed for ${image} (${platform}); retrying in ${delay_seconds}s (${attempt}/${max_attempts})"
++    sleep "${delay_seconds}"
++    attempt=$((attempt + 1))
++    delay_seconds=$((delay_seconds * 2))
++  done
++}
++
+ prepare_directories() {
+   rm -rf "${TEMP_DIR}" "${PAYLOAD_FILE}"
+   mkdir -p "${TEMP_DIR}/images" "${TEMP_DIR}/manifests" "${DIST_DIR}"
+@@ -127,7 +149,7 @@ prepare_images() {
+       fi
+     else
+       log "Pulling ${pull} for ${platform}"
+-      docker pull --platform "${platform}" "${pull}"
++      docker_pull_image "${platform}" "${pull}"
+       [[ "${pull}" == "${build_ref}" ]] || docker tag "${pull}" "${build_ref}"
+     fi
+ 
+diff --git a/addons/minio/build.sh b/addons/minio/build.sh
+index dff92cb..a72f36a 100644
+--- a/addons/minio/build.sh
++++ b/addons/minio/build.sh
+@@ -92,6 +92,28 @@ docker_buildx_available() {
+   docker buildx version >/dev/null 2>&1
+ }
+ 
++
++docker_pull_image() {
++  local platform="$1"
++  local image="$2"
++  local max_attempts="${DOCKER_PULL_RETRIES:-3}"
++  local delay_seconds="${DOCKER_PULL_RETRY_DELAY_SECONDS:-5}"
++  local attempt=1
++
++  while (( attempt <= max_attempts )); do
++    if docker pull --platform "${platform}" "${image}"; then
++      return 0
++    fi
++    if (( attempt == max_attempts )); then
++      return 1
++    fi
++    log "Pull failed for ${image} (${platform}); retrying in ${delay_seconds}s (${attempt}/${max_attempts})"
++    sleep "${delay_seconds}"
++    attempt=$((attempt + 1))
++    delay_seconds=$((delay_seconds * 2))
++  done
++}
++
+ prepare_directories() {
+   rm -rf "${TEMP_DIR}" "${PAYLOAD_FILE}"
+   mkdir -p "${TEMP_DIR}/images" "${TEMP_DIR}/manifests" "${DIST_DIR}"
+@@ -127,7 +149,7 @@ prepare_images() {
+       fi
+     else
+       log "Pulling ${pull} for ${platform}"
+-      docker pull --platform "${platform}" "${pull}"
++      docker_pull_image "${platform}" "${pull}"
+       [[ "${pull}" == "${build_ref}" ]] || docker tag "${pull}" "${build_ref}"
+     fi
+ 
+diff --git a/addons/mysql/build.sh b/addons/mysql/build.sh
+index 9f0a67d..5d94df8 100644
+--- a/addons/mysql/build.sh
++++ b/addons/mysql/build.sh
+@@ -100,6 +100,28 @@ docker_buildx_available() {
+   docker buildx version >/dev/null 2>&1
+ }
+ 
++
++docker_pull_image() {
++  local platform="$1"
++  local image="$2"
++  local max_attempts="${DOCKER_PULL_RETRIES:-3}"
++  local delay_seconds="${DOCKER_PULL_RETRY_DELAY_SECONDS:-5}"
++  local attempt=1
++
++  while (( attempt <= max_attempts )); do
++    if docker pull --platform "${platform}" "${image}"; then
++      return 0
++    fi
++    if (( attempt == max_attempts )); then
++      return 1
++    fi
++    log "Pull failed for ${image} (${platform}); retrying in ${delay_seconds}s (${attempt}/${max_attempts})"
++    sleep "${delay_seconds}"
++    attempt=$((attempt + 1))
++    delay_seconds=$((delay_seconds * 2))
++  done
++}
++
+ prepare_directories() {
+   rm -rf "${TEMP_DIR}" "${PAYLOAD_FILE}"
+   mkdir -p "${TEMP_DIR}/images" "${TEMP_DIR}/manifests" "${DIST_DIR}"
+@@ -171,7 +193,7 @@ prepare_images() {
+       fi
+     else
+       log "Pulling ${pull} for ${platform}"
+-      docker pull --platform "${platform}" "${pull}"
++      docker_pull_image "${platform}" "${pull}"
+       [[ "${pull}" == "${build_ref}" ]] || docker tag "${pull}" "${build_ref}"
+     fi
+ 
+diff --git a/addons/mysql/images/image.json b/addons/mysql/images/image.json
+index 30a0b31..1fcfc86 100644
+--- a/addons/mysql/images/image.json
++++ b/addons/mysql/images/image.json
+@@ -3,7 +3,7 @@
+     "arch": "amd64",
+     "platform": "linux/amd64",
+     "name": "dataprotection-addon-mysql",
+-    "pull": "public.ecr.aws/docker/library/mysql:8.0.45",
++    "pull": "mysql:8.0.45",
+     "tag": "sealos.hub:5000/kube4/dataprotection-addon-mysql:8.0.45",
+     "tar": "dataprotection-addon-mysql-8.0.45-amd64.tar"
+   },
+@@ -11,7 +11,7 @@
+     "arch": "arm64",
+     "platform": "linux/arm64",
+     "name": "dataprotection-addon-mysql",
+-    "pull": "public.ecr.aws/docker/library/mysql:8.0.45",
++    "pull": "mysql:8.0.45",
+     "tag": "sealos.hub:5000/kube4/dataprotection-addon-mysql:8.0.45",
+     "tar": "dataprotection-addon-mysql-8.0.45-arm64.tar"
+   }
+diff --git a/addons/redis/build.sh b/addons/redis/build.sh
+index 5ce33d9..72b7f61 100644
+--- a/addons/redis/build.sh
++++ b/addons/redis/build.sh
+@@ -92,6 +92,28 @@ docker_buildx_available() {
+   docker buildx version >/dev/null 2>&1
+ }
+ 
++
++docker_pull_image() {
++  local platform="$1"
++  local image="$2"
++  local max_attempts="${DOCKER_PULL_RETRIES:-3}"
++  local delay_seconds="${DOCKER_PULL_RETRY_DELAY_SECONDS:-5}"
++  local attempt=1
++
++  while (( attempt <= max_attempts )); do
++    if docker pull --platform "${platform}" "${image}"; then
++      return 0
++    fi
++    if (( attempt == max_attempts )); then
++      return 1
++    fi
++    log "Pull failed for ${image} (${platform}); retrying in ${delay_seconds}s (${attempt}/${max_attempts})"
++    sleep "${delay_seconds}"
++    attempt=$((attempt + 1))
++    delay_seconds=$((delay_seconds * 2))
++  done
++}
++
+ prepare_directories() {
+   rm -rf "${TEMP_DIR}" "${PAYLOAD_FILE}"
+   mkdir -p "${TEMP_DIR}/images" "${TEMP_DIR}/manifests" "${DIST_DIR}"
+@@ -127,7 +149,7 @@ prepare_images() {
+       fi
+     else
+       log "Pulling ${pull} for ${platform}"
+-      docker pull --platform "${platform}" "${pull}"
++      docker_pull_image "${platform}" "${pull}"
+       [[ "${pull}" == "${build_ref}" ]] || docker tag "${pull}" "${build_ref}"
+     fi
+ 
+diff --git a/addons/redis/images/image.json b/addons/redis/images/image.json
+index abf031f..e0bf656 100644
+--- a/addons/redis/images/image.json
++++ b/addons/redis/images/image.json
+@@ -3,7 +3,7 @@
+     "arch": "amd64",
+     "platform": "linux/amd64",
+     "name": "dataprotection-addon-redis",
+-    "pull": "public.ecr.aws/docker/library/redis:7.2.7-alpine",
++    "pull": "redis:7.2.7-alpine",
+     "tag": "sealos.hub:5000/kube4/dataprotection-addon-redis:7.2.7-alpine",
+     "tar": "dataprotection-addon-redis-7.2.7-alpine-amd64.tar"
+   },
+@@ -11,7 +11,7 @@
+     "arch": "arm64",
+     "platform": "linux/arm64",
+     "name": "dataprotection-addon-redis",
+-    "pull": "public.ecr.aws/docker/library/redis:7.2.7-alpine",
++    "pull": "redis:7.2.7-alpine",
+     "tag": "sealos.hub:5000/kube4/dataprotection-addon-redis:7.2.7-alpine",
+     "tar": "dataprotection-addon-redis-7.2.7-alpine-arm64.tar"
+   }
+diff --git a/build.sh b/build.sh
+index 194b78a..9e0a783 100755
+--- a/build.sh
++++ b/build.sh
+@@ -97,6 +97,28 @@ docker_buildx_available() {
+   docker buildx version >/dev/null 2>&1
+ }
+ 
++
++docker_pull_image() {
++  local platform="$1"
++  local image="$2"
++  local max_attempts="${DOCKER_PULL_RETRIES:-3}"
++  local delay_seconds="${DOCKER_PULL_RETRY_DELAY_SECONDS:-5}"
++  local attempt=1
++
++  while (( attempt <= max_attempts )); do
++    if docker pull --platform "${platform}" "${image}"; then
++      return 0
++    fi
++    if (( attempt == max_attempts )); then
++      return 1
++    fi
++    log "Pull failed for ${image} (${platform}); retrying in ${delay_seconds}s (${attempt}/${max_attempts})"
++    sleep "${delay_seconds}"
++    attempt=$((attempt + 1))
++    delay_seconds=$((delay_seconds * 2))
++  done
++}
++
+ assemble_installer() {
+   APP_VERSION="${VERSION}" bash "${ASSEMBLER}" "${ROOT_DIR}/install.sh"
+ }
+@@ -186,13 +208,7 @@ prepare_images() {
+       fi
+     else
+       log "Pulling ${pull} for ${platform}"
+-      if docker_buildx_available; then
+-        docker pull --platform "${platform}" "${pull}"
+-      elif [[ "${platform}" == "${PLATFORM}" ]]; then
+-        docker pull "${pull}"
+-      else
+-        die "docker buildx is required to pull ${pull} for ${platform}"
+-      fi
++      docker_pull_image "${platform}" "${pull}"
+       [[ "${pull}" == "${build_ref}" ]] || docker tag "${pull}" "${build_ref}"
+     fi
+ 

@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-ARG GO_BUILDER_IMAGE=public.ecr.aws/docker/library/golang:1.22.12
+ARG GO_BUILDER_IMAGE=golang:1.22.12
 ARG RUNTIME_IMAGE=gcr.io/distroless/static:nonroot
 ARG BUILDPLATFORM=linux/amd64
 FROM --platform=${BUILDPLATFORM} ${GO_BUILDER_IMAGE} AS builder

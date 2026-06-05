@@ -3,7 +3,7 @@
     "arch": "amd64",
     "platform": "linux/amd64",
     "name": "dataprotection-addon-mysql",
-    "pull": "public.ecr.aws/docker/library/mysql:8.0.45",
+    "pull": "mysql:8.0.45",
     "tag": "sealos.hub:5000/kube4/dataprotection-addon-mysql:8.0.45",
     "tar": "dataprotection-addon-mysql-8.0.45-amd64.tar"
   },
@@ -11,7 +11,7 @@
     "arch": "arm64",
     "platform": "linux/arm64",
     "name": "dataprotection-addon-mysql",
-    "pull": "public.ecr.aws/docker/library/mysql:8.0.45",
+    "pull": "mysql:8.0.45",
     "tag": "sealos.hub:5000/kube4/dataprotection-addon-mysql:8.0.45",
     "tar": "dataprotection-addon-mysql-8.0.45-arm64.tar"
   }

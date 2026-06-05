@@ -97,6 +97,28 @@ docker_buildx_available() {
   docker buildx version >/dev/null 2>&1
 }
 
+
+docker_pull_image() {
+  local platform="$1"
+  local image="$2"
+  local max_attempts="${DOCKER_PULL_RETRIES:-3}"
+  local delay_seconds="${DOCKER_PULL_RETRY_DELAY_SECONDS:-5}"
+  local attempt=1
+
+  while (( attempt <= max_attempts )); do
+    if docker pull --platform "${platform}" "${image}"; then
+      return 0
+    fi
+    if (( attempt == max_attempts )); then
+      return 1
+    fi
+    log "Pull failed for ${image} (${platform}); retrying in ${delay_seconds}s (${attempt}/${max_attempts})"
+    sleep "${delay_seconds}"
+    attempt=$((attempt + 1))
+    delay_seconds=$((delay_seconds * 2))
+  done
+}
+
 assemble_installer() {
   APP_VERSION="${VERSION}" bash "${ASSEMBLER}" "${ROOT_DIR}/install.sh"
 }
@@ -186,13 +208,7 @@ prepare_images() {
       fi
     else
       log "Pulling ${pull} for ${platform}"
-      if docker_buildx_available; then
-        docker pull --platform "${platform}" "${pull}"
-      elif [[ "${platform}" == "${PLATFORM}" ]]; then
-        docker pull "${pull}"
-      else
-        die "docker buildx is required to pull ${pull} for ${platform}"
-      fi
+      docker_pull_image "${platform}" "${pull}"
       [[ "${pull}" == "${build_ref}" ]] || docker tag "${pull}" "${build_ref}"
     fi
 
