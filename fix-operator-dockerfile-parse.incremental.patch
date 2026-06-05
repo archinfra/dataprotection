@@ -1,0 +1,56 @@
+diff --git a/addons/mysql/build.sh b/addons/mysql/build.sh
+index 5d94df8..ea18bf3 100644
+--- a/addons/mysql/build.sh
++++ b/addons/mysql/build.sh
+@@ -151,7 +151,7 @@ with open(output_json, "w", encoding="utf-8") as fh:
+ with open(output_index, "w", encoding="utf-8", newline="") as fh:
+     for item in selected:
+         default_target_ref = item.get("tag") or item.get("pull") or ""
+-        fh.write("\t".join([
++        fh.write("|".join([
+             item.get("name", ""),
+             item.get("tar", ""),
+             default_target_ref,
+@@ -166,11 +166,12 @@ PY
+ prepare_images() {
+   local count=0
+   local payload_image_json="${TEMP_DIR}/images/image.json"
+-  local payload_image_index="${TEMP_DIR}/images/image-index.tsv"
++  local payload_image_index="${TEMP_DIR}/images/image-index.psv"
+ 
+   write_image_metadata "${ARCH}" "${payload_image_json}" "${payload_image_index}"
+ 
+-  while IFS=$'\t' read -r _name tar_name load_ref default_target_ref platform pull dockerfile; do
++  # Use a non-whitespace delimiter so empty pull/dockerfile columns are preserved.
++  while IFS='|' read -r _name tar_name load_ref default_target_ref platform pull dockerfile; do
+     [[ -n "${tar_name}" ]] || continue
+     local build_ref
+     [[ -n "${platform}" ]] || platform="${PLATFORM}"
+diff --git a/build.sh b/build.sh
+index 9e0a783..c659d09 100755
+--- a/build.sh
++++ b/build.sh
+@@ -166,7 +166,7 @@ with open(output_json, "w", encoding="utf-8") as fh:
+ with open(output_index, "w", encoding="utf-8", newline="") as fh:
+     for item in selected:
+         default_target_ref = item.get("tag") or item.get("pull") or ""
+-        fh.write("\t".join([
++        fh.write("|".join([
+             item.get("name", ""),
+             item.get("tar", ""),
+             default_target_ref,
+@@ -181,11 +181,12 @@ PY
+ prepare_images() {
+   local count=0
+   local payload_image_json="${TEMP_DIR}/images/image.json"
+-  local payload_image_index="${TEMP_DIR}/images/image-index.tsv"
++  local payload_image_index="${TEMP_DIR}/images/image-index.psv"
+ 
+   write_image_metadata "${ARCH}" "${payload_image_json}" "${payload_image_index}"
+ 
+-  while IFS=$'\t' read -r name tar_name load_ref default_target_ref platform pull dockerfile; do
++  # Use a non-whitespace delimiter so empty pull/dockerfile columns are preserved.
++  while IFS='|' read -r name tar_name load_ref default_target_ref platform pull dockerfile; do
+     [[ -n "${name}" ]] || continue
+     local build_ref
+     [[ -n "${platform}" ]] || platform="${PLATFORM}"
