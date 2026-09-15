@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	"fmt"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -70,38 +71,23 @@ type BackupExecutionList struct {
 
 func (s *BackupExecutionSpec) ValidateBasic() error {
 	if strings.TrimSpace(s.SourceRef.Name) == "" {
-		return fieldRequiredError("spec.sourceRef.name")
+		return fmt.Errorf("spec.sourceRef.name is required")
 	}
 	if strings.TrimSpace(s.StorageRef.Name) == "" {
-		return fieldRequiredError("spec.storageRef.name")
+		return fmt.Errorf("spec.storageRef.name is required")
 	}
 	if s.RetentionRef != nil && strings.TrimSpace(s.RetentionRef.Name) == "" {
-		return fieldEmptyError("spec.retentionRef.name")
+		return fmt.Errorf("spec.retentionRef.name cannot be empty")
 	}
 	if hasDuplicateLocalObjectReferenceNames(s.NotificationRefs) {
-		return duplicateNamesError("spec.notificationRefs")
+		return fmt.Errorf("spec.notificationRefs contains duplicate names")
+	}
+	switch s.Trigger {
+	case "", BackupExecutionTriggerManual, BackupExecutionTriggerScheduled:
+	default:
+		return fmt.Errorf("spec.trigger must be one of Manual, Scheduled")
 	}
 	return s.JobRuntime.ValidateBasic()
-}
-
-func fieldRequiredError(field string) error {
-	return &validationError{message: field + " is required"}
-}
-
-func fieldEmptyError(field string) error {
-	return &validationError{message: field + " cannot be empty"}
-}
-
-func duplicateNamesError(field string) error {
-	return &validationError{message: field + " contains duplicate names"}
-}
-
-type validationError struct {
-	message string
-}
-
-func (e *validationError) Error() string {
-	return e.message
 }
 
 func init() {
