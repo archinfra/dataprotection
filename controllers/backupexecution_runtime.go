@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	adoptedNativeJobAnnotation     = "dataprotection.archinfra.io/adopted-native-job"
+	adoptedNativeJobAnnotation    = "dataprotection.archinfra.io/adopted-native-job"
 	backupExecutionNameAnnotation = "dataprotection.archinfra.io/backup-execution-name"
 )
 
