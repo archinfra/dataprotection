@@ -102,6 +102,11 @@ func observeTerminalBackupExecution(
 	execution *dpv1alpha1.BackupExecution,
 	resolved *resolvedBackupExecution,
 ) (*terminalBackupObservation, error) {
+	var legacyBackupJobRef *corev1.LocalObjectReference
+	if owner := metav1.GetControllerOf(execution); owner != nil && owner.Kind == "BackupJob" {
+		legacyBackupJobRef = &corev1.LocalObjectReference{Name: owner.Name}
+	}
+
 	observation, err := observeTerminalBackupJob(
 		ctx,
 		c,
@@ -115,20 +120,20 @@ func observeTerminalBackupExecution(
 			}
 			return &corev1.LocalObjectReference{Name: resolved.Policy.Name}
 		}(),
-		nil,
+		legacyBackupJobRef,
 		resolved.Series,
 		resolved.KeepLast,
 	)
 	if err != nil || observation == nil || observation.SnapshotRef == "" {
 		return observation, err
 	}
-	if err := annotateSnapshotWithBackupExecution(ctx, c, execution.Namespace, observation.SnapshotRef, execution.Name); err != nil {
+	if err := linkSnapshotToBackupExecution(ctx, c, execution.Namespace, observation.SnapshotRef, execution.Name); err != nil {
 		return nil, err
 	}
 	return observation, nil
 }
 
-func annotateSnapshotWithBackupExecution(ctx context.Context, c client.Client, namespace, snapshotName, executionName string) error {
+func linkSnapshotToBackupExecution(ctx context.Context, c client.Client, namespace, snapshotName, executionName string) error {
 	var snapshot dpv1alpha1.Snapshot
 	if err := c.Get(ctx, client.ObjectKey{Namespace: namespace, Name: snapshotName}, &snapshot); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -136,10 +141,13 @@ func annotateSnapshotWithBackupExecution(ctx context.Context, c client.Client, n
 		}
 		return err
 	}
-	if snapshot.Annotations != nil && snapshot.Annotations[backupExecutionNameAnnotation] == executionName {
+	if snapshot.Spec.BackupExecutionRef != nil && snapshot.Spec.BackupExecutionRef.Name == executionName &&
+		snapshot.Annotations != nil && snapshot.Annotations[backupExecutionNameAnnotation] == executionName {
 		return nil
 	}
+
 	base := snapshot.DeepCopy()
+	snapshot.Spec.BackupExecutionRef = &corev1.LocalObjectReference{Name: executionName}
 	if snapshot.Annotations == nil {
 		snapshot.Annotations = map[string]string{}
 	}
