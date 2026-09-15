@@ -1,0 +1,36 @@
+name: Feature Generate
+
+on:
+  push:
+    branches:
+      - feat/unify-backup-execution
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/unify-backup-execution
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Generate
+        run: |
+          make fmt
+          make generate
+          make manifests
+      - name: Commit generated artifacts
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: regenerate execution API artifacts"
+          git push origin HEAD:feat/unify-backup-execution
