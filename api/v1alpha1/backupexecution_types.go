@@ -24,6 +24,7 @@ type BackupExecutionSpec struct {
 	JobRuntime       JobRuntimeSpec                `json:"jobRuntime,omitempty"`
 	SnapshotName     string                        `json:"snapshotName,omitempty"`
 	Reason           string                        `json:"reason,omitempty"`
+	// +kubebuilder:default=Manual
 	// +kubebuilder:validation:Enum=Manual;Scheduled
 	Trigger BackupExecutionTrigger `json:"trigger,omitempty"`
 }
