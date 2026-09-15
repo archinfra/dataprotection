@@ -6,10 +6,12 @@ import (
 )
 
 type SnapshotSpec struct {
-	Series        string                       `json:"series"`
-	SourceRef     corev1.LocalObjectReference  `json:"sourceRef"`
-	StorageRef    corev1.LocalObjectReference  `json:"storageRef"`
-	PolicyRef     *corev1.LocalObjectReference `json:"policyRef,omitempty"`
+	Series             string                       `json:"series"`
+	SourceRef          corev1.LocalObjectReference  `json:"sourceRef"`
+	StorageRef         corev1.LocalObjectReference  `json:"storageRef"`
+	PolicyRef          *corev1.LocalObjectReference `json:"policyRef,omitempty"`
+	BackupExecutionRef *corev1.LocalObjectReference `json:"backupExecutionRef,omitempty"`
+	// BackupJobRef is retained for compatibility with snapshots created through the legacy BackupJob API.
 	BackupJobRef  *corev1.LocalObjectReference `json:"backupJobRef,omitempty"`
 	NativeJobName string                       `json:"nativeJobName,omitempty"`
 	BackendPath   string                       `json:"backendPath"`

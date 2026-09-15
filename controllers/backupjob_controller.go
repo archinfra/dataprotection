@@ -2,10 +2,8 @@ package controllers
 
 import (
 	"context"
-	"time"
+	"reflect"
 
-	batchv1 "k8s.io/api/batch/v1"
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -16,10 +14,11 @@ import (
 	dpv1alpha1 "github.com/archinfra/dataprotection/api/v1alpha1"
 )
 
+// BackupJobReconciler is a compatibility adapter. BackupJob no longer executes
+// native Jobs directly; it delegates every request to BackupExecution.
 type BackupJobReconciler struct {
 	client.Client
-	Scheme    *runtime.Scheme
-	APIReader client.Reader
+	Scheme *runtime.Scheme
 }
 
 func (r *BackupJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -30,10 +29,6 @@ func (r *BackupJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	base := backupJob.DeepCopy()
 	backupJob.Status.ObservedGeneration = backupJob.Generation
-	if backupJob.Status.StartedAt == nil {
-		backupJob.Status.StartedAt = nowTime()
-	}
-
 	if err := backupJob.Spec.ValidateBasic(); err != nil {
 		backupJob.Status.Phase = dpv1alpha1.ResourcePhaseFailed
 		backupJob.Status.Message = err.Error()
@@ -44,110 +39,77 @@ func (r *BackupJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, nil
 	}
 
-	resolved, err := resolveBackupJobDependencies(ctx, r.Client, &backupJob)
-	if err != nil {
-		backupJob.Status.Phase = dpv1alpha1.ResourcePhaseFailed
-		backupJob.Status.Message = err.Error()
-		markCondition(&backupJob.Status.Conditions, "Ready", metav1.ConditionFalse, "DependencyError", backupJob.Status.Message, backupJob.Generation)
+	desiredSpec := dpv1alpha1.BackupExecutionSpec{
+		PolicyRef:        backupJob.Spec.PolicyRef,
+		SourceRef:        backupJob.Spec.SourceRef,
+		StorageRef:       backupJob.Spec.StorageRef,
+		RetentionRef:     backupJob.Spec.RetentionRef,
+		NotificationRefs: backupJob.Spec.NotificationRefs,
+		JobRuntime:       backupJob.Spec.JobRuntime,
+		SnapshotName:     backupJob.Spec.SnapshotName,
+		Reason:           backupJob.Spec.Reason,
+		Trigger:          dpv1alpha1.BackupExecutionTriggerManual,
+	}
+
+	var execution dpv1alpha1.BackupExecution
+	key := client.ObjectKey{Namespace: backupJob.Namespace, Name: backupJob.Name}
+	if err := r.Get(ctx, key, &execution); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, err
+		}
+		execution = dpv1alpha1.BackupExecution{
+			ObjectMeta: metav1.ObjectMeta{Name: backupJob.Name, Namespace: backupJob.Namespace},
+			Spec:       desiredSpec,
+		}
+		if err := controllerutil.SetControllerReference(&backupJob, &execution, r.Scheme); err != nil {
+			return ctrl.Result{}, err
+		}
+		if err := r.Create(ctx, &execution); err != nil && !apierrors.IsAlreadyExists(err) {
+			return ctrl.Result{}, err
+		}
+		backupJob.Status.Phase = dpv1alpha1.ResourcePhasePending
+		backupJob.Status.Message = "delegated to BackupExecution"
+		markCondition(&backupJob.Status.Conditions, "Ready", metav1.ConditionFalse, "Delegated", backupJob.Status.Message, backupJob.Generation)
 		if err := r.Status().Patch(ctx, &backupJob, client.MergeFrom(base)); err != nil && !apierrors.IsNotFound(err) {
 			return ctrl.Result{}, err
 		}
 		return requeueSoon(), nil
 	}
 
-	backupJob.Status.Series = resolved.Series
-	notificationRefs := resolveJobNotificationRefs(backupJob.Spec.NotificationRefs, resolved.Policy)
-	if resolved.Source.Spec.Paused {
-		backupJob.Status.Phase = dpv1alpha1.ResourcePhasePaused
-		backupJob.Status.Message = "backup source is paused"
-		markCondition(&backupJob.Status.Conditions, "Ready", metav1.ConditionFalse, "Paused", backupJob.Status.Message, backupJob.Generation)
+	owner := metav1.GetControllerOf(&execution)
+	if owner == nil || owner.UID != backupJob.UID {
+		backupJob.Status.Phase = dpv1alpha1.ResourcePhaseFailed
+		backupJob.Status.Message = "BackupExecution with the same name is not owned by this legacy BackupJob"
+		markCondition(&backupJob.Status.Conditions, "Ready", metav1.ConditionFalse, "ExecutionConflict", backupJob.Status.Message, backupJob.Generation)
 		if err := r.Status().Patch(ctx, &backupJob, client.MergeFrom(base)); err != nil && !apierrors.IsNotFound(err) {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
 	}
 
-	nativeName := dpv1alpha1.BuildJobName(backupJob.Name, "backup")
-	backupJob.Status.NativeJobName = nativeName
-	nativeJob := &batchv1.Job{}
-	if err := r.Get(ctx, client.ObjectKey{Namespace: backupJob.Namespace, Name: nativeName}, nativeJob); err != nil {
-		if !apierrors.IsNotFound(err) {
-			return ctrl.Result{}, err
-		}
-		rendered, err := buildManualBackupNativeJob(&backupJob, resolved)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-		if err := controllerutil.SetControllerReference(&backupJob, rendered, r.Scheme); err != nil {
-			return ctrl.Result{}, err
-		}
-		if err := r.Create(ctx, rendered); err != nil && !apierrors.IsAlreadyExists(err) {
-			return ctrl.Result{}, err
-		}
-		backupJob.Status.Phase = dpv1alpha1.ResourcePhaseRunning
-		backupJob.Status.Message = "backup native job created"
-		markCondition(&backupJob.Status.Conditions, "Ready", metav1.ConditionFalse, "Running", backupJob.Status.Message, backupJob.Generation)
-		if err := r.Status().Patch(ctx, &backupJob, client.MergeFrom(base)); err != nil && !apierrors.IsNotFound(err) {
+	if !reflect.DeepEqual(execution.Spec, desiredSpec) {
+		execBase := execution.DeepCopy()
+		execution.Spec = desiredSpec
+		if err := r.Patch(ctx, &execution, client.MergeFrom(execBase)); err != nil {
 			return ctrl.Result{}, err
 		}
 		return requeueSoon(), nil
 	}
 
-	backupJob.Status.StartedAt = nativeJob.Status.StartTime
-	if observation, err := observeTerminalBackupJob(
-		ctx,
-		r.Client,
-		r.APIReader,
-		nativeJob,
-		resolved.Source,
-		resolved.Storage,
-		func() *corev1.LocalObjectReference {
-			if resolved.Policy == nil {
-				return nil
-			}
-			return &corev1.LocalObjectReference{Name: resolved.Policy.Name}
-		}(),
-		&corev1.LocalObjectReference{Name: backupJob.Name},
-		resolved.Series,
-		resolved.KeepLast,
-	); err != nil {
-		return ctrl.Result{}, err
-	} else if observation != nil {
-		backupJob.Status.Phase = observation.Phase
-		backupJob.Status.Message = observation.Message
-		backupJob.Status.CompletedAt = observation.CompletedAt
-		backupJob.Status.StorageProbeResult = observation.StorageProbeResult
-		backupJob.Status.StorageProbeMessage = observation.StorageProbeMessage
-		backupJob.Status.SnapshotRef = observation.SnapshotRef
-		if len(notificationRefs) > 0 && backupJob.Status.Notification.Phase != dpv1alpha1.NotificationDeliverySucceeded {
-			event := NotificationEvent{
-				Type:          backupNotificationType(observation),
-				Namespace:     backupJob.Namespace,
-				ResourceKind:  "BackupJob",
-				ResourceName:  backupJob.Name,
-				Phase:         string(observation.Phase),
-				Message:       observation.Message,
-				SourceName:    resolved.Source.Name,
-				StorageName:   resolved.Storage.Name,
-				SnapshotName:  observation.SnapshotRef,
-				NativeJobName: nativeJob.Name,
-				Series:        resolved.Series,
-				Timestamp:     nowTime().Time.Format(time.RFC3339),
-			}
-			backupJob.Status.Notification, _ = dispatchNotifications(ctx, r.Client, backupJob.Namespace, notificationRefs, event)
-		}
-		if observation.Phase == dpv1alpha1.ResourcePhaseSucceeded {
-			markCondition(&backupJob.Status.Conditions, "Ready", metav1.ConditionTrue, "Completed", backupJob.Status.Message, backupJob.Generation)
-		} else {
-			markCondition(&backupJob.Status.Conditions, "Ready", metav1.ConditionFalse, "Failed", backupJob.Status.Message, backupJob.Generation)
-		}
-	} else if nativeJob.Status.Active > 0 || nativeJob.Status.StartTime != nil {
-		backupJob.Status.Phase = dpv1alpha1.ResourcePhaseRunning
-		backupJob.Status.Message = "backup native job is running"
-		markCondition(&backupJob.Status.Conditions, "Ready", metav1.ConditionFalse, "Running", backupJob.Status.Message, backupJob.Generation)
-	} else {
+	backupJob.Status.Phase = execution.Status.Phase
+	backupJob.Status.StartedAt = execution.Status.StartedAt
+	backupJob.Status.CompletedAt = execution.Status.CompletedAt
+	backupJob.Status.Message = execution.Status.Message
+	backupJob.Status.NativeJobName = execution.Status.NativeJobName
+	backupJob.Status.Series = execution.Status.Series
+	backupJob.Status.SnapshotRef = execution.Status.SnapshotRef
+	backupJob.Status.StorageProbeResult = execution.Status.StorageProbeResult
+	backupJob.Status.StorageProbeMessage = execution.Status.StorageProbeMessage
+	backupJob.Status.Notification = execution.Status.Notification
+	backupJob.Status.Conditions = execution.Status.Conditions
+	if backupJob.Status.Phase == "" {
 		backupJob.Status.Phase = dpv1alpha1.ResourcePhasePending
-		backupJob.Status.Message = "waiting for backup native job to start"
+		backupJob.Status.Message = "waiting for BackupExecution"
 	}
 
 	if err := r.Status().Patch(ctx, &backupJob, client.MergeFrom(base)); err != nil && !apierrors.IsNotFound(err) {
@@ -159,6 +121,6 @@ func (r *BackupJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 func (r *BackupJobReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&dpv1alpha1.BackupJob{}).
-		Owns(&batchv1.Job{}).
+		Owns(&dpv1alpha1.BackupExecution{}).
 		Complete(r)
 }

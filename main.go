@@ -88,16 +88,20 @@ func main() {
 		ctrl.Log.WithName("setup").Error(err, "unable to create BackupPolicy controller")
 		os.Exit(1)
 	}
-	if err = (&controllers.BackupJobReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), APIReader: mgr.GetAPIReader()}).SetupWithManager(mgr); err != nil {
-		ctrl.Log.WithName("setup").Error(err, "unable to create BackupJob controller")
+	if err = (&controllers.BackupExecutionReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), APIReader: mgr.GetAPIReader()}).SetupWithManager(mgr); err != nil {
+		ctrl.Log.WithName("setup").Error(err, "unable to create BackupExecution controller")
+		os.Exit(1)
+	}
+	if err = (&controllers.BackupJobReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager(mgr); err != nil {
+		ctrl.Log.WithName("setup").Error(err, "unable to create BackupJob compatibility controller")
 		os.Exit(1)
 	}
 	if err = (&controllers.RestoreJobReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), APIReader: mgr.GetAPIReader()}).SetupWithManager(mgr); err != nil {
 		ctrl.Log.WithName("setup").Error(err, "unable to create RestoreJob controller")
 		os.Exit(1)
 	}
-	if err = (&controllers.JobObserverReconciler{Client: mgr.GetClient(), APIReader: mgr.GetAPIReader()}).SetupWithManager(mgr); err != nil {
-		ctrl.Log.WithName("setup").Error(err, "unable to create JobObserver controller")
+	if err = (&controllers.JobObserverReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
+		ctrl.Log.WithName("setup").Error(err, "unable to create scheduled BackupExecution bridge")
 		os.Exit(1)
 	}
 

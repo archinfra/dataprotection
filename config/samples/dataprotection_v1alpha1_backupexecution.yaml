@@ -1,11 +1,12 @@
 apiVersion: dataprotection.archinfra.io/v1alpha1
-kind: BackupJob
+kind: BackupExecution
 metadata:
-  name: mysql-smoke-manual-nfs
+  name: mysql-prod-manual-nfs
   namespace: backup-system
 spec:
+  trigger: Manual
   sourceRef:
-    name: mysql-smoke
+    name: mysql-prod
   storageRef:
     name: nfs-primary
   retentionRef:
@@ -14,4 +15,4 @@ spec:
     activeDeadlineSeconds: 1800
   notificationRefs:
     - name: ops-webhook
-  reason: manual smoke backup to nfs
+  reason: manual smoke backup
