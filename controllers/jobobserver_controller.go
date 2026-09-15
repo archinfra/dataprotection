@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -102,47 +103,14 @@ func (r *JobObserverReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 }
 
 func parseNotificationAnnotation(value string) []string {
-	parts := splitAndTrim(value, ",")
-	return parts
-}
-
-func splitAndTrim(value, separator string) []string {
-	parts := []string{}
-	for _, part := range splitString(value, separator) {
-		if part = trimString(part); part != "" {
-			parts = append(parts, part)
+	parts := strings.Split(value, ",")
+	names := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if name := trimString(part); name != "" {
+			names = append(names, name)
 		}
 	}
-	return parts
-}
-
-func splitString(value, separator string) []string {
-	if value == "" {
-		return nil
-	}
-	result := []string{}
-	start := 0
-	for {
-		index := indexString(value[start:], separator)
-		if index < 0 {
-			result = append(result, value[start:])
-			return result
-		}
-		result = append(result, value[start:start+index])
-		start += index + len(separator)
-	}
-}
-
-func indexString(value, separator string) int {
-	if separator == "" {
-		return -1
-	}
-	for i := 0; i+len(separator) <= len(value); i++ {
-		if value[i:i+len(separator)] == separator {
-			return i
-		}
-	}
-	return -1
+	return names
 }
 
 func (r *JobObserverReconciler) SetupWithManager(mgr ctrl.Manager) error {
