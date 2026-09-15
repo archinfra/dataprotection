@@ -1447,6 +1447,11 @@ func (in *SnapshotSpec) DeepCopyInto(out *SnapshotSpec) {
 		*out = new(corev1.LocalObjectReference)
 		**out = **in
 	}
+	if in.BackupExecutionRef != nil {
+		in, out := &in.BackupExecutionRef, &out.BackupExecutionRef
+		*out = new(corev1.LocalObjectReference)
+		**out = **in
+	}
 	if in.BackupJobRef != nil {
 		in, out := &in.BackupJobRef, &out.BackupJobRef
 		*out = new(corev1.LocalObjectReference)
