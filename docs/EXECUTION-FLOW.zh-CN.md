@@ -1,298 +1,286 @@
-# Execution Flow
+# Backup Execution Flow
 
 ## 目的
 
-这份文档专门解释 `dataprotection v2` 里最容易混淆的一点：
+这份文档说明 `dataprotection v2` 中备份执行的职责边界，以及 `BackupExecution`、Kubernetes `Job`、`Snapshot` 三者的关系。
 
-- `BackupAddon` 只负责业务数据的导入导出
-- `core` 才负责和远端 `NFS / MinIO` 存储系统交互
+## 核心结论
 
-如果只看 `mysql` / `redis` / `minio` / `milvus` 这些 addon YAML，很容易误以为 addon 自己会去上传下载远端快照。实际上不是这样。
+`BackupExecution` 表示**一次具体的备份执行**，并且是这次执行状态的唯一事实源。
 
-## 一句话结论
-
-可以把 v2 的职责理解成下面两句：
-
-- `BackupAddon` 负责：`源系统 <-> Job Pod 内工作目录`
-- `core helper` 负责：`Job Pod 内工作目录 <-> 远端存储`
-
-其中这里的“工作目录”不是宿主机本地目录，也不是 controller 自己的磁盘，而是每次原生 `Job Pod` 里的 `EmptyDir` 临时共享卷。
-
-## 先理解 workspace
-
-在 v2 里，备份/恢复执行发生在 Kubernetes 原生 `Job` Pod 中。
-
-Pod 内会有这些临时目录：
-
-- `/workspace/output`
-  - 备份时给 addon 写导出结果
-- `/workspace/input`
-  - 恢复时给 addon 读快照内容
-- `/workspace/status`
-  - 各个 helper 容器之间同步状态、传递打包产物信息
-
-这些目录都只是当前 Job Pod 的临时空间，Job 结束后就跟着 Pod 生命周期一起回收，不是长期存储。
-
-## 备份时谁做什么
-
-### addon 做什么
-
-addon 只做业务导出。
-
-比如：
-
-- MySQL addon：执行 `mysqldump`，把 SQL 导出到 `/workspace/output`
-- Redis addon：执行 `redis-cli --rdb`，把 RDB 文件写到 `/workspace/output`
-- MinIO addon：执行 `mc mirror`，把源对象同步到 `/workspace/output`
-- Milvus addon：执行 `milvus-backup create`，把备份目录写到 `/workspace/output`
-
-addon 不负责：
-
-- 探测远端备份存储是否可用
-- 把产物上传到 NFS / MinIO
-- 维护 `latest.json`
-- 删除旧快照
-- 创建 `Snapshot` CR
-
-### core 做什么
-
-core 在同一个 backup Job Pod 里自动注入 helper 容器。
-
-备份 Pod 的核心容器链路是：
-
-1. `storage-preflight`
-2. `addon-backup`
-3. `artifact-package`
-4. `artifact-upload`
-
-含义分别是：
-
-1. `storage-preflight`
-   - 执行前先探测目标存储
-   - `NFS`：检查路径是否能创建、是否可写
-   - `MinIO`：检查 endpoint、认证、bucket 是否可访问，可选自动建 bucket
-2. `addon-backup`
-   - 调用业务 addon，把数据导出到 `/workspace/output`
-3. `artifact-package`
-   - 把 `/workspace/output` 打包成统一格式
-   - 输出：
-     - `snapshot.tgz`
-     - `sha256`
-     - `metadata.json`
-4. `artifact-upload`
-   - 上传到 `NFS` 或 `MinIO`
-   - 写入或更新 `latest.json`
-   - 按 retention 删除旧远端文件
-
-## 恢复时谁做什么
-
-恢复 Pod 的核心容器链路是：
-
-1. `storage-preflight`
-2. `artifact-download`
-3. `addon-restore`
-
-含义分别是：
-
-1. `storage-preflight`
-   - 恢复前先确认远端快照存储可达
-2. `artifact-download`
-   - 从 `NFS / MinIO` 下载 `Snapshot` 对应的 `snapshot.tgz`
-   - 解包到 `/workspace/input`
-3. `addon-restore`
-   - 业务 addon 从 `/workspace/input` 读取内容并恢复到目标系统
-
-所以恢复时也一样：
-
-- addon 只读 `/workspace/input`
-- 远端下载依然由 core helper 负责
-
-## 备份执行顺序图
-
-```mermaid
-sequenceDiagram
-    participant P as "BackupPolicy / BackupJob"
-    participant J as "Native Backup Job"
-    participant SP as "storage-preflight"
-    participant AB as "addon-backup"
-    participant PK as "artifact-package"
-    participant UP as "artifact-upload"
-    participant ST as "NFS / MinIO"
-    participant C as "Controller"
-
-    P->>J: create native backup Job
-    J->>SP: start preflight
-    SP->>ST: probe storage reachability
-    alt storage probe failed
-        SP-->>J: fail
-        J-->>C: Job Failed
-        C-->>C: update BackupStorage.status.lastProbe*
-        C-->>C: send StorageProbeFailed notification
-    else storage probe succeeded
-        J->>AB: run addon backup
-        AB->>AB: export business data to /workspace/output
-        J->>PK: package /workspace/output
-        PK->>PK: create snapshot.tgz + sha256 + metadata.json
-        J->>UP: upload artifact
-        UP->>ST: write snapshots/* and latest.json
-        UP->>ST: prune old backend files by retention
-        J-->>C: Job Succeeded + artifact summary
-        C-->>C: create/update Snapshot CR
-        C-->>C: mark latest snapshot
-        C-->>C: prune old Snapshot CRs
-        C-->>C: send BackupSucceeded notification
-    end
+```text
+BackupExecution
+    │
+    │ reconcile
+    ▼
+Kubernetes Job
+    │
+    │ successful artifact
+    ▼
+Snapshot
 ```
 
-## 恢复执行顺序图
+三者的语义严格区分：
 
-```mermaid
-sequenceDiagram
-    participant R as "RestoreJob"
-    participant J as "Native Restore Job"
-    participant SP as "storage-preflight"
-    participant DL as "artifact-download"
-    participant AR as "addon-restore"
-    participant ST as "NFS / MinIO"
-    participant C as "Controller"
+- `BackupExecution`：领域执行对象，回答“这一次备份发生了什么”。
+- Kubernetes `Job`：底层运行载体，负责真正运行备份 Pod。
+- `Snapshot`：成功执行后登记的可恢复资产。
 
-    R->>J: create native restore Job
-    J->>SP: start preflight
-    SP->>ST: probe storage reachability
-    alt storage probe failed
-        SP-->>J: fail
-        J-->>C: Job Failed
-        C-->>C: update BackupStorage.status.lastProbe*
-        C-->>C: send StorageProbeFailed notification
-    else storage probe succeeded
-        J->>DL: download snapshot.tgz
-        DL->>ST: fetch snapshot from backend path
-        DL->>DL: extract to /workspace/input
-        J->>AR: run addon restore
-        AR->>AR: restore from /workspace/input
-        J-->>C: Job Succeeded
-        C-->>C: update RestoreJob status
-        C-->>C: send RestoreSucceeded notification
-    end
+因此业务上不再把 Kubernetes `Job` 当作备份执行记录。
+
+## BackupExecution 从哪里来
+
+### 手工执行
+
+新的手工执行直接创建 `BackupExecution`：
+
+```text
+User / API
+    -> BackupExecution(trigger=Manual)
+    -> Kubernetes Job
+    -> Snapshot
 ```
 
-## Snapshot 是什么时候创建的
+示例：
 
-`Snapshot` 不是 addon 创建的，也不是上传脚本直接创建的。
+```yaml
+apiVersion: dataprotection.archinfra.io/v1alpha1
+kind: BackupExecution
+metadata:
+  name: mysql-prod-manual-nfs
+  namespace: backup-system
+spec:
+  trigger: Manual
+  sourceRef:
+    name: mysql-prod
+  storageRef:
+    name: nfs-primary
+```
 
-它是在：
+查看：
 
-- native backup Job 成功结束之后
-- controller 从 Job 对应 Pod 的 termination summary 里拿到 artifact 信息之后
+```bash
+kubectl get backupexec -n backup-system
+```
 
-由 controller 统一创建或更新。
+### BackupJob 兼容入口
 
-这样做的好处是：
+`BackupJob` 暂时保留用于兼容旧配置，但已经不再直接创建 Kubernetes `Job`。
 
-- 失败执行不会产生伪 `Snapshot`
-- `Snapshot` 只代表“成功且可恢复的资产”
-- retention 可以同时清理：
-  - 远端旧文件
-  - 对应的旧 `Snapshot` CR
+```text
+BackupJob (legacy)
+    -> BackupExecution(trigger=Manual)
+    -> Kubernetes Job
+    -> Snapshot
+```
 
-## latest / retention 是谁维护的
+`BackupJob` controller 只负责：
 
-也是 core 统一维护，不是 addon 维护。
+1. 创建同名 `BackupExecution`。
+2. 把旧 `BackupJob.spec` 映射到 `BackupExecution.spec`。
+3. 把 `BackupExecution.status` 镜像回旧 `BackupJob.status`。
 
-### 远端对象层
+因此旧接口不会形成第二套执行状态机。
 
-上传成功后，core helper 会负责：
+### 定时执行
 
-1. 写入最新的 `latest.json`
-2. 按 retention 删除旧快照文件
+当前阶段继续使用 Kubernetes `CronJob` 作为已有调度载体：
 
-### 控制面 CR 层
+```text
+BackupPolicy
+    -> CronJob
+    -> Kubernetes Job
+    -> BackupExecution(trigger=Scheduled, adopt Job)
+    -> Snapshot
+```
 
-controller 观察到 Job 成功后，会负责：
+这是第一阶段的兼容桥接。
 
-1. 创建或更新当前 `Snapshot`
-2. 把当前成功快照标记为 `status.latest=true`
-3. 按同一条 `series` 删除超出保留窗口的旧 `Snapshot`
+`JobObserver` 的职责已经缩小为：
 
-所以 retention 是“双层一致”的：
+> 发现 `BackupPolicy` 产生的原生 Job，并为它创建对应的 `BackupExecution`。
 
-- 后端文件收敛
-- Kubernetes 里的 `Snapshot` 记录也收敛
+`JobObserver` 不再：
 
-## series 的意义
+- 判断最终备份结果
+- 创建 Snapshot
+- 发送备份成功/失败通知
+- 维护独立的执行状态
 
-retention 不是全局乱删，而是按同一条备份序列处理。
+这些职责统一由 `BackupExecution` controller 完成。
 
-当前语义里，`series` 可以简单理解成：
+后续可以进一步把调度链路演进为：
 
-- 同一个 source
-- 同一个 policy 或手工 job
-- 同一个 storage
+```text
+BackupPolicy
+    -> scheduler
+    -> BackupExecution
+    -> Kubernetes Job
+```
 
-也就是说，“保留最新 3 份” 是在同一条 series 里保留 3 份，而不是把别的 source 的快照也一起算进去。
+但这不是本阶段必须完成的改动。
 
-## 通知是在什么时候发
+## BackupExecution 记录什么
 
-通知也不是 addon 自己发。
+一次执行至少包含：
 
-通知由 controller 在终态时统一发：
+```text
+spec
+├── policyRef            可选，来源策略
+├── sourceRef            备份谁
+├── storageRef           放哪里
+├── retentionRef         保留策略
+├── notificationRefs     通知目标
+├── jobRuntime           运行参数
+├── snapshotName         可选指定快照名
+├── reason               触发原因
+└── trigger              Manual / Scheduled
 
-- `BackupSucceeded`
-- `BackupFailed`
-- `RestoreSucceeded`
-- `RestoreFailed`
-- `StorageProbeFailed`
-- `RetentionPruneFailed`
+status
+├── phase                Pending / Running / Succeeded / Failed / Paused
+├── startedAt
+├── completedAt
+├── nativeJobName
+├── series
+├── snapshotRef
+├── storageProbeResult
+├── storageProbeMessage
+├── notification
+└── conditions
+```
 
-通知路径是：
+这样查看 `BackupExecution` 就能知道一次备份的完整结果，而不需要再同时理解 `BackupPolicy`、CronJob、JobObserver 和原生 Job 的多套状态。
 
-- controller 构造标准事件
-- 发送到 `notification-gateway`
-- gateway 再转发到 webhook 或其他推送渠道
+## Pod 内的数据流
 
-## 为什么要这样设计
+备份/恢复实际执行仍发生在 Kubernetes Job Pod 中。
 
-这样拆开后有几个明显好处：
+工作目录：
 
-### 1. addon 真正解耦
+- `/workspace/output`：addon 输出备份数据
+- `/workspace/input`：addon 读取恢复数据
+- `/workspace/status`：core helper 之间交换执行状态和 artifact 信息
 
-业务插件不再重复实现：
+这些目录来自 Pod 临时工作空间，不是长期备份存储。
 
-- NFS 上传
-- MinIO 上传
-- latest 标记
-- retention 删除
-- 通知发送
+## addon 与 core 的边界
 
-它只需要关注自己的数据源怎么导出和恢复。
+### BackupAddon
 
-### 2. 存储逻辑统一
+addon 只负责中间件本身的数据导出 / 导入：
 
-不管是 MySQL、Redis 还是 Milvus，最后面对的都是同一套：
+```text
+源系统 <-> Job Pod workspace
+```
 
-- preflight
-- package
-- upload
-- download
+例如：
+
+- MySQL：`mysqldump`
+- Redis：`redis-cli --rdb`
+- MinIO：源 bucket/prefix mirror
+- Milvus：`milvus-backup`
+
+addon 不负责 Snapshot CR、远端存储生命周期和通知。
+
+### core/operator
+
+core 负责：
+
+```text
+Job Pod workspace <-> BackupStorage
+```
+
+以及：
+
+- 执行状态
+- 存储探测
+- artifact 打包
+- 上传 / 下载
+- Snapshot 登记
 - retention
+- notification
 
-### 3. 控制面状态统一
+## 备份 Pod 阶段
 
-`BackupStorage.status`、`Snapshot`、通知结果都由 core 统一维护，不会因为每个 addon 自己写一套逻辑而变得不可控。
+当前备份 Job 内主要包含：
 
-## 最后再用一句话总结
+```text
+storage-preflight
+      ↓
+addon-backup
+      ↓
+artifact-package
+      ↓
+artifact-upload
+```
 
-备份时：
+含义：
 
-- addon 把业务数据写到 `/workspace/output`
-- core 把它打包并上传到远端存储
+1. `storage-preflight`：检查 NFS / MinIO 是否可用。
+2. `addon-backup`：把业务数据写入 `/workspace/output`。
+3. `artifact-package`：生成统一备份归档、checksum 和 metadata。
+4. `artifact-upload`：把 artifact 写入目标 `BackupStorage`。
 
-恢复时：
+Job 成功后，`BackupExecution` controller 读取 artifact summary，并创建 / 更新 `Snapshot`。
 
-- core 先把远端快照下载并解包到 `/workspace/input`
-- addon 再从 `/workspace/input` 做恢复
+## Snapshot 的语义
 
-也就是：
+`Snapshot` 只代表：
 
-- addon 只负责“业务数据进出工作目录”
-- core 负责“工作目录和远端存储之间的一切交互”
+> 已成功产生、并被控制面登记的可恢复资产。
+
+它不是一次执行本身。
+
+因此：
+
+```text
+BackupExecution = execution history
+Snapshot        = recovery asset
+```
+
+失败的 `BackupExecution` 可以存在，但不会产生一个成功可恢复的 `Snapshot`。
+
+## 恢复链路
+
+恢复目前仍使用 `RestoreJob`：
+
+```text
+RestoreJob
+    -> Kubernetes Job
+        -> storage-preflight
+        -> artifact-download
+        -> addon-restore
+```
+
+恢复 Job 中：
+
+- core 把远端 artifact 下载 / 解包到 `/workspace/input`
+- addon 从 `/workspace/input` 恢复业务数据
+
+`RestoreExecution` 的统一命名可以作为后续 API 收敛项，本阶段不与 BackupExecution 改动混在一起。
+
+## 当前阶段的架构边界
+
+第一阶段只解决一个核心问题：**备份执行只有一个权威对象。**
+
+完成后：
+
+```text
+Manual --------------------┐
+                           │
+Legacy BackupJob ----------+--> BackupExecution --> Job --> Snapshot
+                           │
+BackupPolicy/CronJob ------┘
+```
+
+这为后续继续做以下能力提供统一基础：
+
+- stage-level status
+- retry / attempt
+- metrics
+- audit
+- failure retention
+- verification
+- operations agent diagnosis
+
+这些后续能力都应该围绕 `BackupExecution` 扩展，而不是再给 CronJob、JobObserver 或 BackupJob 建新的执行状态模型。
